@@ -78,7 +78,7 @@
   <header>
     <h1>asset-lab</h1>
     <button id="btn-sprite" class="active">sprite preview</button>
-    <button id="btn-scene">scene preview</button>
+    <button id="btn-level">level preview</button>
   </header>
   <main>
     <canvas id="canvas" width="800" height="600"></canvas>
@@ -88,7 +88,7 @@
   </main>
   <script type="module">
     import { SpritePreviewMode } from './modes/sprite_preview.js';
-    import { ScenePreviewMode } from './modes/scene_preview.js';
+    import { LevelPreviewMode } from './modes/level_preview.js';
 
     const els = {
       canvas: document.getElementById('canvas'),
@@ -97,7 +97,7 @@
       emptyStateElement: document.getElementById('empty'),
     };
     const btnSprite = document.getElementById('btn-sprite');
-    const btnScene = document.getElementById('btn-scene');
+    const btnLevel = document.getElementById('btn-level');
 
     let current = null;
     async function switchTo(modeName) {
@@ -106,18 +106,18 @@
       els.canvas.getContext('2d').clearRect(0, 0, els.canvas.width, els.canvas.height);
       if (modeName === 'sprite') {
         btnSprite.classList.add('active');
-        btnScene.classList.remove('active');
+        btnLevel.classList.remove('active');
         current = new SpritePreviewMode(els);
       } else {
-        btnScene.classList.add('active');
+        btnLevel.classList.add('active');
         btnSprite.classList.remove('active');
-        current = new ScenePreviewMode(els);
+        current = new LevelPreviewMode(els);
       }
       await current.start();
     }
 
     btnSprite.addEventListener('click', () => switchTo('sprite'));
-    btnScene.addEventListener('click', () => switchTo('scene'));
+    btnLevel.addEventListener('click', () => switchTo('level'));
 
     switchTo('sprite');
   </script>

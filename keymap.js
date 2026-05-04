@@ -25,8 +25,8 @@ export const SPRITE_KEYMAP = {
   // Tab/Shift 切 sprite: MVP 不做 (浏览器无目录列举 API; 见 plan §6.1)
 };
 
-export const SCENE_KEYMAP = {
-  // F1-F9 切 scene: MVP 不做 (同上)。先只暴露 zoom。
+export const LEVEL_KEYMAP = {
+  // F1-F9 切关卡: MVP 不做 (同上)。先只暴露 zoom。
   Equal: { action: 'zoom', value: '+1' },
   Minus: { action: 'zoom', value: '-1' },
   Digit0: { action: 'zoom', value: 'reset' },

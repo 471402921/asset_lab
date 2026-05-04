@@ -1,42 +1,41 @@
 import { Renderer } from '../core/renderer.js';
 import { InputManager } from '../core/input.js';
-import { loadScene } from '../core/scene_loader.js';
+import { loadLevel } from '../core/level_loader.js';
 import { loadSprite } from '../loaders/sprite_loader.js';
 import { loadItem } from '../loaders/item_loader.js';
 import { loadUI } from '../loaders/ui_loader.js';
-import { loadSceneBg } from '../loaders/scene_bg_loader.js';
-import { SCENE_KEYMAP } from '../keymap.js';
+import { loadMap } from '../loaders/map_loader.js';
+import { LEVEL_KEYMAP } from '../keymap.js';
 
-const DEFAULT_SCENE = 'scenes/level_001.json';
+const DEFAULT_LEVEL = 'levels/level_001.json';
 
-export class ScenePreviewMode {
+export class LevelPreviewMode {
   constructor({ canvas, promptElement, infoElement, emptyStateElement }) {
     this.renderer = new Renderer(canvas);
     this.input = new InputManager(promptElement);
     this.infoElement = infoElement;
     this.emptyStateElement = emptyStateElement;
-    this.scene = null;
-    this.bg = null;
-    this.entities = [];
+    this.level = null;
+    this.entities = []; // [{entity, image}], 顺序即 z-order
   }
 
   async start() {
     this.input.start();
-    this.input.setKeymap(SCENE_KEYMAP, (b) => this._dispatch(b));
-    const result = await loadScene(DEFAULT_SCENE);
+    this.input.setKeymap(LEVEL_KEYMAP, (b) => this._dispatch(b));
+    const result = await loadLevel(DEFAULT_LEVEL);
     if (result.error) {
-      console.info('[scene_preview] empty state:', result.error);
+      console.info('[level_preview] empty state:', result.error);
       this._showEmpty(result.error);
       return;
     }
-    this.scene = result.scene;
+    this.level = result.level;
     try {
-      await this._loadAll();
+      await this._loadEntities();
       this._hideEmpty();
       this._showInfo();
       this._render();
     } catch (e) {
-      console.info('[scene_preview] empty state:', e.message);
+      console.info('[level_preview] empty state:', e.message);
       this._showEmpty(e.message);
     }
   }
@@ -47,10 +46,9 @@ export class ScenePreviewMode {
     if (this.infoElement) this.infoElement.innerHTML = '';
   }
 
-  async _loadAll() {
-    this.bg = await loadSceneBg(`assets/${this.scene.background}`);
+  async _loadEntities() {
     this.entities = [];
-    for (const ent of this.scene.entities) {
+    for (const ent of this.level.entities) {
       const image = await this._loadEntity(ent);
       this.entities.push({ entity: ent, image });
     }
@@ -58,6 +56,7 @@ export class ScenePreviewMode {
 
   async _loadEntity(ent) {
     const path = `assets/${ent.asset}`;
+    if (ent.type === 'map') return loadMap(path);
     if (ent.type === 'sprite') {
       const sp = await loadSprite(path);
       return sp.rotations[ent.facing ?? 'south'];
@@ -79,24 +78,28 @@ export class ScenePreviewMode {
 
   _render() {
     this.renderer.clear();
-    this.renderer.drawBackground(this.bg);
     for (const { entity, image } of this.entities) {
-      this.renderer.drawEntity(image, entity.x, entity.y);
+      // map 类型铺满整个 canvas (作为底层); 其它按 x/y 摆位
+      if (entity.type === 'map') {
+        this.renderer.drawBackground(image);
+      } else {
+        this.renderer.drawEntity(image, entity.x, entity.y);
+      }
     }
   }
 
   _showInfo() {
     this.infoElement.innerHTML = `
-      <div><b>scene:</b> ${DEFAULT_SCENE}</div>
-      <div>${this.scene.entities.length} entities · zoom: ${this.renderer.zoom}×</div>
+      <div><b>level:</b> ${DEFAULT_LEVEL}</div>
+      <div>${this.level.entities.length} entities · zoom: ${this.renderer.zoom}×</div>
     `;
   }
 
   _showEmpty(msg) {
     this.emptyStateElement.innerHTML = `
-      <h2>无法加载场景</h2>
+      <h2>无法加载关卡</h2>
       <p><b>原因:</b> ${msg}</p>
-      <p>需要 <code>${DEFAULT_SCENE}</code> 以及它引用的所有资源 (背景 / sprite / item / ui)。</p>
+      <p>需要 <code>${DEFAULT_LEVEL}</code> 以及它引用的所有资源 (map / sprite / item / ui)。</p>
     `;
     this.emptyStateElement.style.display = 'block';
   }

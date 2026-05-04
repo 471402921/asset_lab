@@ -33,9 +33,9 @@ cd asset_lab && npx serve
 2. 在 pixellab 生成资源 (Web 或 Claude Code + MCP, 见下)
 3. 把 pixellab 导出目录拷进 assets/{type}/{name}/
 4. 右键 index.html → Open with Live Server
-5. 顶部切 sprite preview / scene preview
+5. 顶部切 sprite preview / level preview
 6. 键盘交互看效果 (8 方向 / 缩放)
-7. 想改场景: 跟 Claude Code 说 "把 husky 往左挪 50" → 改 scenes/*.json → 浏览器自动刷新
+7. 想改关卡: 跟 Claude Code 说 "把 husky 往左挪 50" → 改 levels/*.json → 浏览器自动刷新
 8. 满意 → git commit && git push
 ```
 
@@ -49,9 +49,9 @@ cd asset_lab && npx serve
 | `0` | 缩放重置回 4× |
 | Space / `[` / `]` | 动画控制 (MVP 静帧, 待动画样本到位后实装) |
 
-### Scene preview
+### Level preview
 
-加载 `scenes/level_001.json`,按 entities 顺序 (z-order) 渲染背景 + sprite + item + ui。改 JSON → 刷新即生效。Schema 见 [asset-lab-plan.md](asset-lab-plan.md) §6.2。
+加载 `levels/level_001.json`,按 entities 顺序 (z-order) 渲染 map / sprite / item / ui。地图也是 entity (`{"type":"map"}`),没有特例化的 background 字段。改 JSON → 刷新即生效。Schema 见 [asset-lab-plan.md](asset-lab-plan.md) §6.2。
 
 ---
 
@@ -64,10 +64,13 @@ assets/
 ├── sprites/{name}/        # pixellab metadata.json + rotations/*.png
 ├── items/{name}.png
 ├── ui/{name}.png
-├── scenes/{name}.png      # 背景图
+├── maps/{name}.png        # 全图地图 (pixellab create_map 生成)
 ├── effects/{name}/        # 帧序列
 ├── audio/{music,sfx}/
-└── tilemaps/              # loader 暂未实装
+└── tilemaps/              # 瓦片地图, loader 暂未实装
+
+levels/
+└── level_001.json         # 关卡组合 JSON
 ```
 
 Sprite 的 metadata.json 必须是 pixellab 导出格式,`export_version === "2.0"`。其它版本会硬报错而非静默兼容。
