@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>asset-lab</title>
+  <style>
+    body {
+      margin: 0;
+      background: #1a1a1a;
+      color: #ddd;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 16px;
+      background: #2a2a2a;
+      border-bottom: 1px solid #444;
+    }
+    header h1 { font-size: 14px; margin: 0; color: #888; font-weight: 500; }
+    header button {
+      background: #333;
+      color: #ddd;
+      border: 1px solid #555;
+      padding: 6px 14px;
+      cursor: pointer;
+      font-size: 13px;
+      border-radius: 3px;
+    }
+    header button.active { background: #4a6da7; border-color: #6b8dc7; }
+    main {
+      position: relative;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: calc(100vh - 50px);
+    }
+    canvas {
+      background: #000;
+      image-rendering: pixelated;
+      image-rendering: -moz-crisp-edges;
+      image-rendering: crisp-edges;
+      border: 1px solid #333;
+    }
+    #info {
+      position: fixed; top: 60px; left: 16px;
+      background: rgba(0,0,0,0.7); padding: 8px 12px;
+      font-size: 12px; border-radius: 4px;
+      pointer-events: none; max-width: 60%;
+    }
+    #info:empty, #prompt:empty { display: none; }
+    #prompt {
+      position: fixed; bottom: 16px; right: 16px;
+      background: rgba(0,0,0,0.7); padding: 8px 12px;
+      font-size: 11px; border-radius: 4px;
+      max-width: 320px; pointer-events: none;
+      line-height: 1.5;
+    }
+    #prompt .kg { margin: 2px 0; }
+    #prompt b { color: #6b8dc7; }
+    #empty {
+      display: none;
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      background: #2a2a2a; padding: 24px 32px;
+      border: 1px solid #555; border-radius: 6px;
+      max-width: 520px;
+    }
+    #empty h2 { margin-top: 0; }
+    #empty code {
+      background: #111; padding: 2px 6px;
+      border-radius: 3px; font-size: 12px; color: #f0c674;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>asset-lab</h1>
+    <button id="btn-sprite" class="active">sprite preview</button>
+    <button id="btn-scene">scene preview</button>
+  </header>
+  <main>
+    <canvas id="canvas" width="800" height="600"></canvas>
+    <div id="info"></div>
+    <div id="prompt"></div>
+    <div id="empty"></div>
+  </main>
+  <script type="module">
+    import { SpritePreviewMode } from './modes/sprite_preview.js';
+    import { ScenePreviewMode } from './modes/scene_preview.js';
+
+    const els = {
+      canvas: document.getElementById('canvas'),
+      promptElement: document.getElementById('prompt'),
+      infoElement: document.getElementById('info'),
+      emptyStateElement: document.getElementById('empty'),
+    };
+    const btnSprite = document.getElementById('btn-sprite');
+    const btnScene = document.getElementById('btn-scene');
+
+    let current = null;
+    async function switchTo(modeName) {
+      if (current) current.stop();
+      els.emptyStateElement.style.display = 'none';
+      els.canvas.getContext('2d').clearRect(0, 0, els.canvas.width, els.canvas.height);
+      if (modeName === 'sprite') {
+        btnSprite.classList.add('active');
+        btnScene.classList.remove('active');
+        current = new SpritePreviewMode(els);
+      } else {
+        btnScene.classList.add('active');
+        btnSprite.classList.remove('active');
+        current = new ScenePreviewMode(els);
+      }
+      await current.start();
+    }
+
+    btnSprite.addEventListener('click', () => switchTo('sprite'));
+    btnScene.addEventListener('click', () => switchTo('scene'));
+
+    switchTo('sprite');
+  </script>
+</body>
+</html>
