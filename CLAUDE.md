@@ -68,6 +68,19 @@ These come from plan §9 and §11. They are load-bearing decisions, not preferen
 - `facing` only meaningful for `sprite` (defaults to `south`).
 - Asset paths are relative to `assets/`.
 
+### Entity ownership (asset-lab vs cute_pet)
+
+Not all level entity types are owned by asset-lab. Important boundary:
+
+| Type | source of truth | meaning of x/y in level JSON |
+|---|---|---|
+| `map`, `sprite` | **asset-lab** (level JSON) | real layout, cute_pet reads this |
+| `item`, `ui`, `effect`, `audio` | **cute_pet runtime** (Flutter+GetX business logic) | design-intent reference only — cute_pet ignores it and decides real position from game state |
+
+So when a designer writes `{"type":"item", "x":180, "y":220}` in a level, they're showing the cute_pet engineer "roughly this size, roughly this spot" — **not** dictating runtime placement. asset-lab still renders these entities at the JSON-specified position so the designer can visualize the intent. Plan §8.1 has the full table.
+
+Practical implication: do not over-invest in level features around items/ui/effects/audio (selectors, layering, snap-to-grid, etc.) — they're reference renders, not engine specs.
+
 File writes (for editing level JSON, future game_meta editor) will use the File System Access API on Chromium with a download-button fallback for Safari/Firefox. **Not implemented yet** (`core/file_writer.js` deliberately doesn't exist — MVP is read-only).
 
 ## Running
