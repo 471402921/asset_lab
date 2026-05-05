@@ -1,8 +1,0 @@
-{
-  "entities": [
-    { "type": "map",    "asset": "maps/forest_clearing.png" },
-    { "type": "sprite", "asset": "sprites/husky_chibi", "x": 120, "y": 200, "facing": "south", "animation": "idle" },
-    { "type": "item",   "asset": "items/bone.png",      "x": 180, "y": 220 },
-    { "type": "ui",     "asset": "ui/dialogue_frame.png", "x": 0,   "y": 400 }
-  ]
-}

@@ -4,3 +4,8 @@ node_modules/
 tmp/
 .mcp.json
 *.log
+
+# pixellab 原始导出: workflow buffer, 不进 git
+temporary_asset/*
+!temporary_asset/.gitkeep
+
