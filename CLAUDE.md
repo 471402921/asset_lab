@@ -25,7 +25,7 @@ Plus a **temporary scaffold**: **Browser level runtime preview** ([preview/](pre
 asset-lab is the **bridge layer** between pixellab.ai (resource generation) and cute_pet (the game, Flutter+Flame+GetX).
 
 - ✅ git-managed asset directory
-- ✅ Sprite 8-direction preview (pixellab's web UI doesn't do keyboard interaction)
+- ✅ Sprite preview with N-direction support (4 or 8, sprite-driven from `character.directions`) — pixellab's web UI doesn't do keyboard interaction; mobile touch UI auto-enabled on coarse-pointer devices
 - ✅ pixellab character → Tiled `.tsx` conversion (sprite-only)
 - ✅ Browser level runtime preview (`preview/`, Phaser, **temporary scaffold**) — lets designer walk around a `.tmj`. Cute_pet engineer will replace this with their own `lib/demo/level_preview.dart`
 - ❌ **Not a level editor** — Tiled is. Designer installs Tiled and edits/exports .tmj directly.
@@ -82,7 +82,7 @@ These are load-bearing decisions, not preferences. From plan §9.
 ### Converter side ([tools/](tools/))
 - `pixellab_to_tiled.py` — CLI orchestrator (sprite-only mode: `--sprites`).
 - `converters/ir.py` — `Sprite`, `SpriteFrame` dataclasses. Tool-agnostic. Slim now; grow only with real consumers.
-- `converters/pixellab/parse_sprite.py` — pixellab character export → `IR.Sprite` (8 frames with `direction` property each).
+- `converters/pixellab/parse_sprite.py` — pixellab character export → `IR.Sprite` (one tile per `frames.rotations` direction, each with `direction` property; `character.directions` ∈ {4, 8} drives the count).
 - `converters/tiled/write_tsx.py` — IR → Tiled `.tsx` XML (image collection style).
 
 See [tools/converters/README.md](tools/converters/README.md) for the decoupling rules and how to add a new source/target.
@@ -127,7 +127,7 @@ Primary user is one designer using Claude Code in VS Code + Tiled (GUI level edi
 - **Adding per-anim FPS**: if designer wants different speeds per state (currently all 8 fps), add `frames.animations[state].fps` to metadata + read it in sprite_loader.js + apply in both sprite_preview RAF and Phaser anim. Don't pre-implement.
 - **Converter changes**: if a new pixellab field appears or a new Tiled convention is needed, that's a converter change. Stay in the parser/writer split; don't blob logic into the CLI orchestrator.
 - **Don't touch `temporary_asset/`** when restructuring directories — that's the designer's drop zone.
-- **If the request is "preview a level in the browser"**, redirect to "open .tmx in Tiled" instead. Don't reintroduce level_preview.
+- **If the request is "edit a level in the browser"**, redirect to "open .tmj in Tiled" instead. Don't reintroduce a level _editor_ in asset-lab. (Runtime "walking around" is what `preview/` already provides — that's a separate thing and stays.)
 - **If the request is "convert this pixellab Map Editor export"**, redirect to "let designer rebuild in Tiled directly". Don't reintroduce map converter.
 
 ## pixellab MCP
