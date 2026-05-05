@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
   <meta charset="UTF-8">
-  <title>asset-lab · sprite preview</title>
+  <title>asset-lab</title>
   <style>
     body {
       margin: 0;
@@ -19,7 +19,17 @@
       border-bottom: 1px solid #444;
     }
     header h1 { font-size: 14px; margin: 0; color: #888; font-weight: 500; }
-    header .hint { font-size: 11px; color: #666; }
+    header .hint { font-size: 11px; color: #666; margin-left: auto; }
+    header button {
+      background: #333;
+      color: #ddd;
+      border: 1px solid #555;
+      padding: 6px 14px;
+      cursor: pointer;
+      font-size: 13px;
+      border-radius: 3px;
+    }
+    header button.active { background: #4a6da7; border-color: #6b8dc7; }
     main {
       position: relative;
       display: flex;
@@ -34,6 +44,11 @@
       image-rendering: crisp-edges;
       border: 1px solid #333;
     }
+    #game {
+      display: none;
+      border: 1px solid #333;
+    }
+    #game canvas { border: none; }
     #info {
       position: fixed; top: 60px; left: 16px;
       background: rgba(0,0,0,0.7); padding: 8px 12px;
@@ -67,11 +82,14 @@
 </head>
 <body>
   <header>
-    <h1>asset-lab · sprite preview</h1>
-    <span class="hint">关卡编辑请用 Tiled 打开 assets/maps/*.tmx</span>
+    <h1>asset-lab</h1>
+    <button id="btn-sprite" class="active">sprite preview</button>
+    <button id="btn-level">level preview</button>
+    <span class="hint">关卡编辑请用 Tiled 打开 assets/maps/*.tmj</span>
   </header>
   <main>
     <canvas id="canvas" width="800" height="600"></canvas>
+    <div id="game"></div>
     <div id="info"></div>
     <div id="prompt"></div>
     <div id="empty"></div>
@@ -81,13 +99,53 @@
 
     const els = {
       canvas: document.getElementById('canvas'),
+      gameElement: document.getElementById('game'),
       promptElement: document.getElementById('prompt'),
       infoElement: document.getElementById('info'),
       emptyStateElement: document.getElementById('empty'),
     };
+    const btnSprite = document.getElementById('btn-sprite');
+    const btnLevel = document.getElementById('btn-level');
 
-    const mode = new SpritePreviewMode(els);
-    await mode.start();
+    let current = null;
+
+    async function switchTo(modeName) {
+      if (current?.stop) current.stop();
+      els.emptyStateElement.style.display = 'none';
+      els.infoElement.innerHTML = '';
+      els.promptElement.innerHTML = '';
+
+      if (modeName === 'sprite') {
+        btnSprite.classList.add('active');
+        btnLevel.classList.remove('active');
+        els.canvas.style.display = '';
+        els.gameElement.style.display = 'none';
+        els.canvas.getContext('2d').clearRect(0, 0, els.canvas.width, els.canvas.height);
+        current = new SpritePreviewMode(els);
+        await current.start();
+      } else {
+        btnLevel.classList.add('active');
+        btnSprite.classList.remove('active');
+        els.canvas.style.display = 'none';
+        els.gameElement.style.display = '';
+        // Lazy-load Phaser preview runtime (临时拐杖, 见 preview/README.md)
+        const { LevelPreviewMode } = await import('./preview/main.js');
+        current = new LevelPreviewMode(els);
+        await current.start();
+      }
+
+      // Persist via query param so refresh keeps mode.
+      const url = new URL(window.location);
+      url.searchParams.set('mode', modeName);
+      window.history.replaceState({}, '', url);
+    }
+
+    btnSprite.addEventListener('click', () => switchTo('sprite'));
+    btnLevel.addEventListener('click', () => switchTo('level'));
+
+    const initialMode = new URLSearchParams(window.location.search).get('mode') === 'level'
+      ? 'level' : 'sprite';
+    await switchTo(initialMode);
   </script>
 </body>
 </html>

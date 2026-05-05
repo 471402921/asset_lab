@@ -1,0 +1,356 @@
+/* preview/main.js
+ *
+ * ⚠️ 临时拐杖 (TEMPORARY SCAFFOLD)
+ * 见 preview/README.md。cute_pet 工程师把 lib/demo/level_preview.dart 写好后,
+ * 整个 preview/ 目录拆掉。不要让本目录蔓延业务逻辑。
+ *
+ * 范围:
+ *   - 加载 .tmj (Tiled JSON)
+ *   - 玩家 8 方向移动 (WASD + QEZC, Arcade Physics 矩形碰撞)
+ *   - 撞 walls object layer + 撞家具 (per-tile collision via Tiled)
+ *   - 相机两档 zoom (远景 2× / 近景 4×, 按 X 切换), 跟随玩家
+ *   - 缺资源 → 友好空态, 不启动 Phaser
+ *
+ * 不做:
+ *   - 业务逻辑 / 状态机 / 任务 / 对话 / 背包 / NPC AI
+ *   - sprite 状态切换 (沿用 sprite_preview 的 STATE SLOT 策略)
+ *   - 多关卡切换 UI (?map=xxx.tmj 是逃生口)
+ *   - 音频 (Phaser audio 留给真用时再加)
+ */
+
+const PHASER_CDN = 'https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js';
+const DEFAULT_MAP = 'assets/maps/level_001.tmj';
+const DEFAULT_SPRITE_DIR = 'assets/sprites/husky_chibi';
+
+// 远景 (整张地图视野) / 近景 (玩家周围细节)
+const ZOOM_LEVELS = [2, 4];
+const DEFAULT_ZOOM_INDEX = 0;
+
+const PLAYER_SPEED = 120;   // px/s
+
+// 8 方向移动键 -> [vx, vy] 单位向量 (斜向归一化)
+const D = Math.SQRT1_2;
+const MOVE_KEYS = {
+  KeyW: { dir: 'north',      vx:  0, vy: -1 },
+  KeyD: { dir: 'east',       vx:  1, vy:  0 },
+  KeyS: { dir: 'south',      vx:  0, vy:  1 },
+  KeyA: { dir: 'west',       vx: -1, vy:  0 },
+  KeyQ: { dir: 'north-west', vx: -D, vy: -D },
+  KeyE: { dir: 'north-east', vx:  D, vy: -D },
+  KeyZ: { dir: 'south-west', vx: -D, vy:  D },
+  KeyC: { dir: 'south-east', vx:  D, vy:  D },
+};
+
+let _phaserPromise = null;
+
+function loadPhaser() {
+  if (window.Phaser) return Promise.resolve();
+  if (_phaserPromise) return _phaserPromise;
+  _phaserPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = PHASER_CDN;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error(`无法加载 Phaser CDN: ${PHASER_CDN}`));
+    document.head.appendChild(s);
+  });
+  return _phaserPromise;
+}
+
+async function fetchMetadata(spriteDir) {
+  const url = `${spriteDir}/metadata.json`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`未找到 sprite metadata: ${url} (HTTP ${r.status})`);
+  const meta = await r.json();
+  if (meta.export_version !== '2.0') {
+    throw new Error(`Unknown pixellab export_version: ${meta.export_version}`);
+  }
+  return meta;
+}
+
+async function checkMap(mapPath) {
+  const r = await fetch(mapPath, { method: 'HEAD' });
+  if (!r.ok) throw new Error(`未找到关卡 .tmj: ${mapPath} (HTTP ${r.status})`);
+}
+
+export class LevelPreviewMode {
+  constructor({ gameElement, infoElement, promptElement, emptyStateElement }) {
+    this.gameElement = gameElement;
+    this.infoElement = infoElement;
+    this.promptElement = promptElement;
+    this.emptyStateElement = emptyStateElement;
+    this.game = null;
+  }
+
+  async start() {
+    this._showPrompt();
+
+    // 1. 资源存在性检查 — 缺则空态, 不启动 Phaser
+    let spriteMeta;
+    try {
+      spriteMeta = await fetchMetadata(DEFAULT_SPRITE_DIR);
+    } catch (e) {
+      console.info('[level_preview] empty state:', e.message);
+      return this._showEmpty('player sprite', e.message, DEFAULT_SPRITE_DIR);
+    }
+    try {
+      await checkMap(DEFAULT_MAP);
+    } catch (e) {
+      console.info('[level_preview] empty state:', e.message);
+      return this._showEmpty('关卡 .tmj', e.message, DEFAULT_MAP);
+    }
+
+    // 2. lazy load Phaser
+    try {
+      await loadPhaser();
+    } catch (e) {
+      console.info('[level_preview] empty state:', e.message);
+      return this._showEmpty('Phaser CDN', e.message, PHASER_CDN);
+    }
+
+    // 3. 启动 Phaser game
+    this._hideEmpty();
+    this._startGame(spriteMeta);
+  }
+
+  stop() {
+    if (this.game) {
+      this.game.destroy(true);
+      this.game = null;
+    }
+    this.gameElement.innerHTML = '';
+    this._hideEmpty();
+    if (this.infoElement) this.infoElement.innerHTML = '';
+    if (this.promptElement) this.promptElement.innerHTML = '';
+  }
+
+  _startGame(spriteMeta) {
+    const SceneClass = makePreviewScene({
+      spriteMeta,
+      mapPath: DEFAULT_MAP,
+      spriteDir: DEFAULT_SPRITE_DIR,
+      onInfoUpdate: (txt) => {
+        if (this.infoElement) this.infoElement.innerHTML = txt;
+      },
+    });
+
+    this.game = new window.Phaser.Game({
+      type: window.Phaser.AUTO,
+      parent: this.gameElement,
+      pixelArt: true,
+      roundPixels: true,
+      backgroundColor: '#000',
+      scale: {
+        mode: window.Phaser.Scale.NONE,
+        width: 640,
+        height: 640,
+      },
+      physics: {
+        default: 'arcade',
+        arcade: { debug: false },
+      },
+      scene: SceneClass,
+    });
+  }
+
+  _showPrompt() {
+    if (!this.promptElement) return;
+    this.promptElement.innerHTML = `
+      <div class="kg"><b>move</b>: WASD + QEZC (8 方向)</div>
+      <div class="kg"><b>zoom</b>: X (远景 ↔ 近景)</div>
+    `;
+  }
+
+  _showEmpty(what, why, expectedPath) {
+    this.emptyStateElement.innerHTML = `
+      <h2>关卡预览启动失败</h2>
+      <p><b>缺:</b> ${what}</p>
+      <p><b>原因:</b> ${why}</p>
+      <p>预期路径: <code>${expectedPath}</code></p>
+      <p>修复后刷新页面。</p>
+    `;
+    this.emptyStateElement.style.display = 'block';
+  }
+
+  _hideEmpty() {
+    if (this.emptyStateElement) this.emptyStateElement.style.display = 'none';
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Phaser Scene (factory, 因 Phaser 是 lazy load 不能在模块顶部 extends)
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate }) {
+  return class PreviewScene extends window.Phaser.Scene {
+    constructor() {
+      super('PreviewScene');
+      this.zoomIndex = DEFAULT_ZOOM_INDEX;
+    }
+
+    preload() {
+      this.load.tilemapTiledJSON('level', mapPath);
+      // sprite: 8 方向各一 PNG (pixellab metadata.frames.rotations)
+      for (const [dir, relPath] of Object.entries(spriteMeta.frames.rotations)) {
+        this.load.image(`player_${dir}`, `${spriteDir}/${relPath}`);
+      }
+    }
+
+    create() {
+      this.map = this.make.tilemap({ key: 'level' });
+
+      // 加载 tileset images. 约定: 设计师在 Tiled 导出 .tmj 时勾选
+      // "Embed tilesets" (或单个 tileset 的 "Embed in map"), 这样 .tmj
+      // 自包含 tileset 数据, Phaser 直接吃。外部 .tsx 引用未来再支持。
+      const tilesetImageKeys = [];
+      for (const ts of this.map.tilesets) {
+        // ts.image 是 Tiled 里 tileset 引用的 PNG (相对 .tmj 路径)
+        const imgRel = ts.image || (ts.source ? null : null);
+        if (!imgRel) {
+          console.warn(
+            `[preview] tileset "${ts.name}" 是外部 .tsx 引用 (Phaser 当前不支持). ` +
+              `请在 Tiled 里改为 Embed Tilesets, 或等 preview 升级。`
+          );
+          continue;
+        }
+        const key = `ts_${ts.name}`;
+        // Phaser 要求 image 已 preload; 这里 lazy load 不太行 —
+        // 改在 preload 阶段做。重构: 把 tileset image 加载移到 preload。
+        // 但 preload 时还没 tilemap 信息……所以两阶段: preload tilemap →
+        // create 里再启第二个 scene 或用 dynamic load。
+        // 简化: 用 this.load 在 create 里再开一次 (Phaser 支持中途 load)
+        this.load.image(key, this._resolveTilesetImage(mapPath, imgRel));
+        tilesetImageKeys.push({ ts, key });
+      }
+
+      // 第二次 load 完成后再继续
+      this.load.once('complete', () => this._buildLevel(tilesetImageKeys));
+      this.load.start();
+    }
+
+    _resolveTilesetImage(mapAbsPath, imgRelToTmj) {
+      // mapPath e.g. "assets/maps/level_001.tmj"
+      // imgRel e.g. "../tilesets/foo/tile.png" (相对 .tmj 文件)
+      const dir = mapAbsPath.substring(0, mapAbsPath.lastIndexOf('/') + 1);
+      // 简化: 直接拼, 浏览器会规范 ../
+      return new URL(dir + imgRelToTmj, window.location.href).pathname.slice(1);
+    }
+
+    _buildLevel(tilesetImageKeys) {
+      // 注册所有 tileset
+      const tilesets = tilesetImageKeys.map(({ ts, key }) =>
+        this.map.addTilesetImage(ts.name, key)
+      );
+
+      // 创建所有 tile layer
+      for (const layerData of this.map.layers) {
+        const layer = this.map.createLayer(layerData.name, tilesets);
+        if (layer) layer.setCollisionByProperty({ collides: true });
+      }
+
+      // 玩家初始位置: 'spawn' object (如有), 否则地图中心
+      const spawnX = this.map.widthInPixels / 2;
+      const spawnY = this.map.heightInPixels / 2;
+      let startX = spawnX;
+      let startY = spawnY;
+      const objLayers = this.map.objects || [];
+      for (const ol of objLayers) {
+        for (const obj of ol.objects) {
+          if (obj.name === 'spawn' || obj.type === 'spawn') {
+            startX = obj.x;
+            startY = obj.y;
+          }
+        }
+      }
+
+      // Player
+      this.player = this.physics.add.sprite(startX, startY, 'player_south');
+      this.player.facing = 'south';
+      this.player.setCollideWorldBounds(true);
+      // body 缩小一点, 给 sprite 视觉留余地 (玩家像素 60×60, body 用 32×32 中心)
+      const bodyW = Math.min(this.player.width, 32);
+      const bodyH = Math.min(this.player.height, 32);
+      this.player.body.setSize(bodyW, bodyH);
+      this.player.body.setOffset(
+        (this.player.width - bodyW) / 2,
+        (this.player.height - bodyH) / 2
+      );
+
+      // Walls / collision: 尝试找 'walls' object layer 并加 static body
+      const wallsLayer = objLayers.find((ol) => ol.name === 'walls');
+      if (wallsLayer) {
+        const wallsGroup = this.physics.add.staticGroup();
+        for (const obj of wallsLayer.objects) {
+          if (obj.width <= 0 || obj.height <= 0) continue;
+          const rect = wallsGroup
+            .create(obj.x + obj.width / 2, obj.y + obj.height / 2, null)
+            .setSize(obj.width, obj.height)
+            .setVisible(false);
+          rect.refreshBody();
+        }
+        this.physics.add.collider(this.player, wallsGroup);
+      }
+
+      // Tile-based collision (家具 etc., 通过 tile property collides:true)
+      for (const layerData of this.map.layers) {
+        const layer = this.map.getLayer(layerData.name)?.tilemapLayer;
+        if (layer) this.physics.add.collider(this.player, layer);
+      }
+
+      // Camera
+      this.cameras.main.setBounds(0, 0, this.map.widthInPixels, this.map.heightInPixels);
+      this.cameras.main.startFollow(this.player, true, 0.15, 0.15);
+      this.cameras.main.setZoom(ZOOM_LEVELS[this.zoomIndex]);
+      this.physics.world.setBounds(0, 0, this.map.widthInPixels, this.map.heightInPixels);
+
+      // Input
+      this.keys = this.input.keyboard.addKeys('W,A,S,D,Q,E,Z,C,X');
+
+      // X 切 zoom
+      this.input.keyboard.on('keydown-X', () => {
+        this.zoomIndex = (this.zoomIndex + 1) % ZOOM_LEVELS.length;
+        this.cameras.main.setZoom(ZOOM_LEVELS[this.zoomIndex]);
+        this._updateInfo();
+      });
+
+      this._updateInfo();
+    }
+
+    update() {
+      if (!this.player) return;
+      let vx = 0;
+      let vy = 0;
+      let pressedDir = null;
+      for (const [code, m] of Object.entries(MOVE_KEYS)) {
+        const keyName = code.replace('Key', '');
+        if (this.keys[keyName]?.isDown) {
+          vx += m.vx;
+          vy += m.vy;
+          pressedDir = m.dir;
+        }
+      }
+      // 多键归一化: 多个键叠加可能 >1, 归一回 1
+      const mag = Math.hypot(vx, vy);
+      if (mag > 1) {
+        vx /= mag;
+        vy /= mag;
+      }
+      this.player.setVelocity(vx * PLAYER_SPEED, vy * PLAYER_SPEED);
+
+      if (pressedDir && pressedDir !== this.player.facing) {
+        this.player.facing = pressedDir;
+        this.player.setTexture(`player_${pressedDir}`);
+        this._updateInfo();
+      }
+    }
+
+    _updateInfo() {
+      if (!this.player || !onInfoUpdate) return;
+      const z = ZOOM_LEVELS[this.zoomIndex];
+      const zoomLabel = this.zoomIndex === 0 ? '远景' : '近景';
+      onInfoUpdate(
+        `<div><b>level:</b> ${mapPath}</div>` +
+          `<div>player: ${spriteDir} · facing: ${this.player.facing} · zoom: ${z}× (${zoomLabel}, X 切换)</div>`
+      );
+    }
+  };
+}
