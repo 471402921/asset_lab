@@ -8,15 +8,16 @@ Working MVP. Three pieces (long-term scope):
 
 1. **GitHub-based asset file management** — `assets/` directory holds all resources, designer drops files in, git tracks history. asset-lab does no special processing on most of it.
 2. **pixellab sprite → Tiled `.tsx` converter** (Python, [tools/](tools/)) — turns pixellab character exports into Tiled `.tsx` (image collection, 8-direction tiles with `direction` property). **Sprite-only**; map/tilemap conversion was deleted on 2026-05-05.
-3. **Browser sprite preview** (vanilla JS) — sprite_preview reads pixellab character `metadata.json` + 8 directional PNGs, supports keyboard interaction (8 directions + zoom + state/animation playback). State switching + animation playback **implemented 2026-05-05** when first sprite (`yellow_Shiba`) arrived with non-empty `frames.animations`. Schema + fallback rules in plan §13.1.
+3. **Browser sprite preview** (vanilla JS) — sprite_preview reads pixellab character `metadata.json` + N directional PNGs (N ∈ {4, 8}, **designer chose 4 cardinals as of 2026-05-05**), supports keyboard interaction (face / zoom / state / animation playback). Face keymap is sprite-driven: 4-dir sprites only show WASD; 8-dir sprites also wire QEZC. Schema + fallback rules in plan §13.1.
 
-Plus a **temporary scaffold**: **Browser level runtime preview** ([preview/](preview/), Phaser via CDN lazy-load). Lets the designer "walk around" a freshly-edited `.tmj` in the browser. Plays sprite walking animation when player moves (heuristic state_key lookup). **Will be removed** once cute_pet engineer ships `lib/demo/level_preview.dart`. Do NOT let `preview/` accrete business logic — it's a bridge, not a long-term home.
+Plus a **temporary scaffold**: **Browser level runtime preview** ([preview/](preview/), Phaser via CDN lazy-load). Lets the designer "walk around" a freshly-edited `.tmj` in the browser. Plays sprite walking animation when player moves (heuristic state_key lookup). Movement keys also sprite-driven (4-dir sprites only allow WASD). **Will be removed** once cute_pet engineer ships `lib/demo/level_preview.dart`. Do NOT let `preview/` accrete business logic — it's a bridge, not a long-term home.
 
 [asset-lab-plan.md](asset-lab-plan.md) is the design doc + decision log; **read it before any non-trivial work**. Major scope shifts logged in its 修订记录:
 - 2026-05-05: dropped in-browser level preview (Tiled does this better)
 - 2026-05-05 (later same day): dropped pixellab Map Editor → .tmx converter (designer prefers Tiled directly; pixellab now only outputs basic PNG elements + sprites)
 - 2026-05-05 (later again): added `preview/` Phaser temporary scaffold for level runtime preview while cute_pet engineer waits for schema to stabilize
 - 2026-05-05 (4th revision): sprite animation + state switching landed (STATE SLOT placeholder → real impl) when first sprite arrived
+- 2026-05-05 (5th revision): sprite cut to 4-cardinal directions; code became sprite-driven for direction count; sprite schema 雏形 declared stable
 
 ## What this tool is (and is NOT)
 
@@ -38,7 +39,7 @@ These are load-bearing decisions, not preferences. From plan §9.
 ### Browser side (sprite preview)
 - **Zero build, zero deps.** No npm, no React/Vue/Phaser/p5, no webpack/vite. Pure HTML + Vanilla JS + Canvas 2D. Designer + Claude Code vibe-codes on raw JS.
 - **pixellab `metadata.json` is upstream contract.** Never change field semantics. Hard-error on `export_version !== "2.0"`.
-- **Direction strings stay raw.** Use pixellab's literal `south`, `south-east`, `east`, ... in code. Do NOT translate to `N/E/S/W`.
+- **Direction strings stay raw.** Use pixellab's literal `south`, `east`, `north`, `west` (and `south-east` etc. when 8-dir) in code. Do NOT translate to `N/E/S/W`. Don't hardcode the direction count — `character.directions ∈ {4, 8}`, derive from `frames.rotations` keys.
 - **Pixel purity is P0.** `ctx.imageSmoothingEnabled = false` AND CSS `image-rendering: pixelated`. Zoom is integer-only (2/3/4/6/8, default 4). Reject non-integer zoom.
 - **STATE SLOT is implemented (2026-05-05).** When first real sprite arrived with non-empty `frames.animations`, the placeholder became real (Tab + Digit1-9 + Space + [/]). Same rule still applies for **future schema discoveries**: don't guess at unknown pixellab fields — wait for real samples and update plan §13/§14 first. Add new fallback rules to plan §13.1 (current rule: exact dir → south → static rotation; no mirror fallback).
 

@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<tileset version="1.10" tiledversion="1.10" name="yellow_Shiba" tilewidth="60" tileheight="60" tilecount="8" columns="0">
+<tileset version="1.10" tiledversion="1.10" name="yellow_Shiba" tilewidth="60" tileheight="60" tilecount="4" columns="0">
  <grid orientation="orthogonal" width="60" height="60" />
  <properties>
   <property name="characterName" value="yellow Shiba" />
@@ -15,44 +15,20 @@
  </tile>
  <tile id="1">
   <properties>
-   <property name="direction" value="south-east" />
-  </properties>
-  <image source="rotations/south-east.png" width="60" height="60" />
- </tile>
- <tile id="2">
-  <properties>
    <property name="direction" value="east" />
   </properties>
   <image source="rotations/east.png" width="60" height="60" />
  </tile>
- <tile id="3">
-  <properties>
-   <property name="direction" value="north-east" />
-  </properties>
-  <image source="rotations/north-east.png" width="60" height="60" />
- </tile>
- <tile id="4">
+ <tile id="2">
   <properties>
    <property name="direction" value="north" />
   </properties>
   <image source="rotations/north.png" width="60" height="60" />
  </tile>
- <tile id="5">
-  <properties>
-   <property name="direction" value="north-west" />
-  </properties>
-  <image source="rotations/north-west.png" width="60" height="60" />
- </tile>
- <tile id="6">
+ <tile id="3">
   <properties>
    <property name="direction" value="west" />
   </properties>
   <image source="rotations/west.png" width="60" height="60" />
- </tile>
- <tile id="7">
-  <properties>
-   <property name="direction" value="south-west" />
-  </properties>
-  <image source="rotations/south-west.png" width="60" height="60" />
  </tile>
 </tileset>

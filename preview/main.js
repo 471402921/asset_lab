@@ -6,7 +6,7 @@
  *
  * 范围:
  *   - 加载 .tmj (Tiled JSON)
- *   - 玩家 8 方向移动 (WASD + QEZC, Arcade Physics 矩形碰撞)
+ *   - 玩家方向数跟随 sprite (4-dir: WASD, 8-dir: WASD + QEZC), Arcade Physics 矩形碰撞
  *   - 撞 walls object layer + 撞家具 (per-tile collision via Tiled)
  *   - 相机两档 zoom (远景 2× / 近景 4×, 按 X 切换), 跟随玩家
  *   - 玩家移动时播 walking 动画 (按 plan §13.1 fallback chain), 停止时播 idle 段
@@ -37,7 +37,8 @@ const ANIMATION_FPS = 8;
 const WALKING_NAME_HINTS = ['walk'];
 const IDLE_NAME_HINTS = ['idle', 'stand', 'breath', 'rest'];
 
-// 8 方向移动键 -> [vx, vy] 单位向量 (斜向归一化)
+// 全部方向 → [vx, vy] 单位向量 (斜向归一化)
+// 实际生效的子集在 makePreviewScene 里按 sprite 方向数过滤
 const D = Math.SQRT1_2;
 const MOVE_KEYS = {
   KeyW: { dir: 'north',      vx:  0, vy: -1 },
@@ -91,8 +92,6 @@ export class LevelPreviewMode {
   }
 
   async start() {
-    this._showPrompt();
-
     // 1. 资源存在性检查 — 缺则空态, 不启动 Phaser
     let spriteMeta;
     try {
@@ -107,6 +106,9 @@ export class LevelPreviewMode {
       console.info('[level_preview] empty state:', e.message);
       return this._showEmpty('关卡 .tmj', e.message, DEFAULT_MAP);
     }
+
+    // sprite 已知后, 提示面板按真实方向数显示 (4-dir vs 8-dir)
+    this._showPrompt(spriteMeta);
 
     // 2. lazy load Phaser
     try {
@@ -161,10 +163,13 @@ export class LevelPreviewMode {
     });
   }
 
-  _showPrompt() {
+  _showPrompt(spriteMeta) {
     if (!this.promptElement) return;
+    const dirCount = Object.keys(spriteMeta.frames.rotations).length;
+    const moveLabel =
+      dirCount >= 8 ? 'WASD + QEZC (8 方向)' : 'WASD (4 方向)';
     this.promptElement.innerHTML = `
-      <div class="kg"><b>move</b>: WASD + QEZC (8 方向)</div>
+      <div class="kg"><b>move</b>: ${moveLabel}</div>
       <div class="kg"><b>zoom</b>: X (远景 ↔ 近景)</div>
     `;
   }
@@ -190,6 +195,13 @@ export class LevelPreviewMode {
  * ──────────────────────────────────────────────────────────────────────────── */
 
 function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate }) {
+  // sprite 真实有几个方向, 玩家移动键就只生效那几个
+  // (4-dir sprite: WASD; 8-dir sprite: WASD+QEZC)
+  const availableDirs = new Set(Object.keys(spriteMeta.frames.rotations));
+  const moveKeys = Object.fromEntries(
+    Object.entries(MOVE_KEYS).filter(([, m]) => availableDirs.has(m.dir))
+  );
+
   return class PreviewScene extends window.Phaser.Scene {
     constructor() {
       super('PreviewScene');
@@ -371,7 +383,7 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate }) {
       let vx = 0;
       let vy = 0;
       let pressedDir = null;
-      for (const [code, m] of Object.entries(MOVE_KEYS)) {
+      for (const [code, m] of Object.entries(moveKeys)) {
         const keyName = code.replace('Key', '');
         if (this.keys[keyName]?.isDown) {
           vx += m.vx;

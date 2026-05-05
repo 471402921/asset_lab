@@ -82,16 +82,16 @@ npx serve
 
 | 键 | 作用 |
 |---|---|
-| W / D / S / A | north / east / south / west |
-| Q / E / Z / C | NW / NE / SW / SE |
+| W / D / S / A | north / east / south / west (4 cardinals,所有 sprite 都有) |
+| Q / E / Z / C | NW / NE / SW / SE (**仅 8-dir sprite 时显示**;4-dir sprite 自动隐藏) |
 | `+` / `-` | 整数倍缩放 (2 / 3 / 4 / 6 / 8) |
 | `0` | 缩放重置回 4× |
 | Digit 1-9 | 切换状态/动画 (按 `frames.animations` 顺序; 选中后自动播放) |
-| Tab | 清状态, 回 8 方向静帧 |
+| Tab | 清状态, 回 N 方向静帧 |
 | Space | 播放 / 暂停当前动画 |
 | `[` / `]` | 单帧步进 (前 / 后, 自动暂停) |
 
-state_key 缺当前方向时自动 fallback 到 `south` 帧 (info 面板会标 `↳ south fallback`)。
+state_key 缺当前方向时自动 fallback 到 `south` 帧 (info 面板会标 `↳ south fallback`)。提示面板按 sprite 真实 `frames.rotations` 过滤,4-dir sprite 不显示 QEZC。
 
 #### Level preview 键盘 (临时拐杖)
 
@@ -99,8 +99,8 @@ state_key 缺当前方向时自动 fallback 到 `south` 帧 (info 面板会标 `
 
 | 键 | 作用 |
 |---|---|
-| W / D / S / A | 玩家上 / 右 / 下 / 左移动 (移动时自动播 walking 动画) |
-| Q / E / Z / C | NW / NE / SW / SE 斜向移动 |
+| W / D / S / A | 玩家上 / 右 / 下 / 左移动 (移动时自动播 walk 动画) |
+| Q / E / Z / C | 仅 sprite 是 8-dir 时生效 (NW/NE/SW/SE 斜向移动);4-dir sprite 时静默 |
 | X | 相机 zoom 切换 (远景 2× ↔ 近景 4×, 都跟随玩家) |
 
 走路动画按 sprite `frames.animations` 里启发式找含 `walk` 的 state_key (设计师源头 semantic 命名后命中)。该方向缺 → south fallback → 静帧。停止时若 sprite 有 `idle`/`stand`/`breath` 段则播放,否则静帧。

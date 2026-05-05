@@ -8,6 +8,11 @@
 
 ## 修订记录
 
+- **2026-05-05 (5th revision today) sprite 缩到 4 方向 + schema 雏形定型**: 设计师跟 cute_pet 工程师对齐: **实际游戏只做 4 cardinal 方向** (south/east/north/west), 8 方向制图工作量 2× 但游戏端短期不需要。yellow_Shiba 第三轮 round 把磁盘 rotations 从 8 个砍到 4 个,animations 命名也剥掉 hash 后缀变 `idle / walk / yawn / sleeping / crouch`。asset-lab 这边:
+  - **metadata.json sync 到磁盘** (`directions: 4`, drop 4 个对角线 rotation 条目)
+  - **代码改成 sprite-driven 方向数**: `sprite_preview.js` 按 sprite 实际 rotations 过滤 face 键 (4-dir sprite 提示面板只显示 WASD); `preview/main.js` (Phaser) MOVE_KEYS 同步过滤 (4-dir sprite 玩家只 WASD 走, QEZC 静默, 跟"游戏只 4 方向"一致)
+  - **不硬编码 4**: `character.directions ∈ {4, 8}` 是 schema 第一类公民, 未来 8-dir sprite 进来代码也工作
+  - **schema 雏形定型** (3 轮 yellow_Shiba 迭代, 抽象层 0 改动验证): rotations + animations + state_key opaque ID + direction fallback chain + 8/4 dir 切换 都稳定。docs/cute_pet_integration.md §1.1 的 sprite schema 段可以视为 stable contract (其他 .tmj/audio/tileset 章节仍 unstable)
 - **2026-05-05 (4th revision today) sprite 动画 + 状态切换实装 (STATE SLOT 落地)**: 设计师交付第一只完整 sprite (`yellow_Shiba`), `frames.animations` 不再是空 — 含 5 段动画 (idle / walking / sleeping / lying / crouch),且**跨方向不齐全** (walking 有 south/east/west, 其他只有 south)。原 STATE SLOT placeholder 触发实装:
   - **schema 真相** 写进 §13.1: `frames.animations[state_key][direction] = [frame paths]`,direction 可独立缺失
   - **fallback chain**: 请求 (state, direction) → 命中? → 否则 south 帧 → 否则 rotations 静帧。**不做镜像 fallback** (没 east 不 flip west)
@@ -530,20 +535,16 @@ pixellab MCP 主要工具(完整列表见 [pixellab MCP docs](https://api.pixell
     "prompt": "yellow shibainu, chibi 3-head-body ratio, chubby baby proportions, big round head, ...",
     "size": { "width": 60, "height": 60 },
     "template_id": "mannequin",
-    "directions": 8,
+    "directions": 4,
     "view": "low top-down",
     "created_at": "2026-05-03T04:48:19.677874+00:00"
   },
   "frames": {
     "rotations": {
       "south": "rotations/south.png",
-      "south-east": "rotations/south-east.png",
       "east": "rotations/east.png",
-      "north-east": "rotations/north-east.png",
       "north": "rotations/north.png",
-      "north-west": "rotations/north-west.png",
-      "west": "rotations/west.png",
-      "south-west": "rotations/south-west.png"
+      "west": "rotations/west.png"
     },
     "animations": {
       "<state_key>": {
@@ -556,48 +557,53 @@ pixellab MCP 主要工具(完整列表见 [pixellab MCP docs](https://api.pixell
     }
   },
   "export_version": "2.0",
-  "export_date": "2026-05-05T06:47:36.472701"
+  "export_date": "2026-05-05T07:13:59.221310"
 }
 ```
 
-**对应文件结构** (yellow_Shiba 真样本):
+**对应文件结构** (yellow_Shiba 真样本, 2026-05-05 第三轮 designer rename + 缩到 4 方向):
 
 ```
 assets/sprites/yellow_Shiba/
 ├── metadata.json
-├── rotations/                       # 8 方向静帧 (永远齐全)
-│   ├── south.png 等 8 张 60×60
-├── animations/                      # 5 个动画 (设计师源头命名, asset-lab 不映射)
-│   ├── <state_key_1>/<direction>/frame_NNN.png
-│   └── ...
+├── rotations/                       # 4 方向静帧 (cardinal: s/n/e/w)
+│   ├── south.png 等 4 张 60×60
+├── animations/                      # 5 个动画 (semantic 命名: idle/walk/yawn/sleeping/crouch)
+│   ├── idle/south/frame_NNN.png
+│   ├── walk/{south,east,west,north}/frame_NNN.png   # 4 cardinals 都有
+│   ├── yawn/south/frame_NNN.png
+│   ├── sleeping/south/frame_NNN.png
+│   └── crouch/south/frame_NNN.png
 └── yellow_Shiba.tsx                 # asset-lab converter 产 (Tiled image collection)
 ```
 
 **字段使用提示**:
 - `character.size` → Canvas 渲染尺寸(60×60,4× 缩放绘 240×240)
-- `character.directions` → 验证用(应等于 frames.rotations 的 key 数)
+- `character.directions` ∈ **{4, 8}** → 验证用(应等于 frames.rotations 的 key 数)。**2026-05-05 起设计师采用 4 方向方案**(`south/east/north/west` cardinal),节省制图工作量;loader / preview 都已按 sprite 实际方向数动态适配
 - `character.view` → 在 UI 角落显示(`low top-down` 等)
 - `frames.rotations[key]` → 相对 metadata.json 的路径,`<img src>` 加载
-- `frames.animations[state_key][direction]` → frame PNG 路径数组,**任意一段都可能缺方向**(yellow_Shiba 实测: walking 有 west/east/south, idle/sleep/lie/crouch 都只有 south)
+- `frames.animations[state_key][direction]` → frame PNG 路径数组,**任意一段都可能缺方向**(yellow_Shiba 实测: walk 有全 4 cardinals; idle/yawn/sleeping/crouch 都只有 south)
 - `export_version` → 启动时检查;仅支持 `"2.0"`
 
-### 13.1 frames.animations 详细 schema (2026-05-05 第一只 sprite 实测)
+### 13.1 frames.animations 详细 schema (2026-05-05 第一只 sprite 实测, 第三轮缩到 4 方向)
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `frames.animations[state_key]` | `dict[direction, list[path]]` | `state_key` 是设计师在 pixellab 命名,asset-lab 把它当 opaque ID 用,**不维护 alias 表**;**约定**: 设计师起 semantic name(`idle` / `walking` / `sleeping` 等),不要用 prompt-derived 长串 |
-| `direction` | `str` | pixellab 8 方向之一(literal 字符串,不翻译) |
+| `character.directions` | `int` | 当前观察到 `4` 或 `8`。设计师 2026-05-05 决定先做 4 (cardinal only)。loader 与 preview 按 sprite 实际方向数自适应,不硬编码 |
+| `frames.rotations` | `dict[direction, path]` | 静帧, key 数 == `character.directions`, 永远齐全 |
+| `frames.animations[state_key]` | `dict[direction, list[path]]` | `state_key` 是设计师在 pixellab 命名,asset-lab 把它当 opaque ID 用,**不维护 alias 表**;**约定**: 设计师起 semantic name(`idle` / `walk` / `yawn` / `sleeping` / `crouch` 等),不要用 prompt-derived 长串或 hash 后缀 |
+| `direction` | `str` | pixellab literal 字符串(`south` / `north-east` / 等), 不翻译 |
 | frame path | `str` | 相对 metadata.json 的 PNG 路径,`animations/{state_key}/{direction}/frame_NNN.png` 是 pixellab 默认布局,但 loader 不假设,直接用 metadata 给的路径 |
 
-**direction 覆盖规则**: 同一动画下不同方向**可独立缺失**。yellow_Shiba 实测:
+**direction 覆盖规则**: 同一动画下不同方向**可独立缺失**。yellow_Shiba 实测 (round 3 final):
 
 | 动画 | 方向覆盖 | 帧数 |
 |---|---|---|
-| 走 (walking) | south / east / west(3 个) | 9 帧 |
-| 待机 (idle/breathing) | south(1 个) | 9 帧 |
-| 哈欠 (sleepy yawn) | south(1 个) | 17 帧 |
-| 躺 (lying) | south(1 个) | 8 帧 |
-| 蹲 (crouch) | south(1 个) | 9 帧 |
+| `walk` | south / east / west / north(4 cardinals 全) | 9 帧 |
+| `idle` | south(1 个) | 9 帧 |
+| `yawn` | south(1 个) | 13 帧 |
+| `sleeping` | south(1 个) | 8 帧 |
+| `crouch` | south(1 个) | 9 帧 |
 
 **消费侧 fallback chain** (asset-lab `modes/sprite_preview.js` + `preview/main.js` + cute_pet 都按此实装):
 

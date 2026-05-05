@@ -34,10 +34,17 @@ export class SpritePreviewMode {
 
   async start() {
     this.input.start();
-    this.input.setKeymap(SPRITE_KEYMAP, (b) => this._dispatch(b));
     try {
       this.sprite = await loadSprite(DEFAULT_SPRITE);
       this.stateKeys = Object.keys(this.sprite.animations);
+      // Filter face keys to only those the sprite actually has rotations for.
+      // (4-dir sprite drops Q/E/Z/C from prompt panel; 8-dir keeps them.)
+      const keymap = Object.fromEntries(
+        Object.entries(SPRITE_KEYMAP).filter(
+          ([, b]) => b.action !== 'face' || this.sprite.rotations[b.value]
+        )
+      );
+      this.input.setKeymap(keymap, (b) => this._dispatch(b));
       this._hideEmpty();
       this._showInfo();
       this._render();
