@@ -78,6 +78,18 @@ npx serve
 
 推荐 Chrome / Edge 122+。
 
+### 手机预览 (触屏自动启用)
+
+支持手机浏览器跑 sprite + level preview。把 asset-lab 部署到 HTTP 服务器后,手机访问该 URL 即可。
+
+- **触发条件**: 媒体查询 `(pointer: coarse), (max-width: 900px)` 命中即开触屏 UI
+- **桌面零回归**: 大屏 + 鼠标 (`pointer: fine`) 行为完全跟之前一样,触屏 UI 自动隐藏
+- **触屏 UI**:
+  - sprite preview: state 横向滚动条 + DPad (按 sprite 实际方向数显示) + 播放控制 (◀/▶/▶|) + 缩放 (-/⊙/+)
+  - level preview: 左下角悬浮 DPad、右下角悬浮 zoom 按钮、半透明覆盖在 Phaser 上不挡视野
+- **像素纯度**: 浏览器走 nearest-neighbor 缩放 (CSS `image-rendering: pixelated`),mobile 默认 zoom 提到 6× 留余地。**不引入 pinch-to-zoom** (破坏整数像素)
+- **viewport meta**: `<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">` 防双击放大
+
 #### Sprite preview 键盘
 
 | 键 | 作用 |

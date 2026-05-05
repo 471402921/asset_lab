@@ -8,6 +8,14 @@
 
 ## 修订记录
 
+- **2026-05-05 (6th revision today) 加手机触屏 UI**: 设计师计划部署到自己服务器供手机访问。asset-lab 100% 键盘驱动,手机能"看不能点"。在 `index.html` 加触屏 UI DOM (sprite preview: state strip + DPad + 播放 + zoom; level preview: 浮动 DPad + zoom 按钮),`@media (pointer: coarse), (max-width: 900px)` 媒体查询命中才显示。**桌面键盘流程零回归** — 大屏 + 鼠标看到的页面跟之前一样。
+  - sprite_preview.js 触屏按钮 → 复用 `_dispatch` (单一 action 入口键鼠触并联)
+  - preview/main.js 共享 `touchState` 对象 (DOM pointerdown/up 写, scene.update() 跟 `this.keys` 并联读;zoom 按钮单触发用 `zoomTrigger` flag scene 消费后清)
+  - DPad 按钮按 `Object.keys(sprite.rotations)` 过滤 (4-dir sprite 隐藏 4 个对角线按钮)
+  - 空态时 (no sprite / no .tmj) 触屏 UI 一并隐藏 (game 没起来,DPad 无意义)
+  - mobile 默认 zoom 提到 6× (60×60 sprite 在小屏不至于看不清)
+  - Phaser scale.mode 改 `FIT` + `autoCenter: CENTER_BOTH`,canvas 自适应父容器尺寸
+  - **不引入**: pinch-to-zoom (破坏整数像素)、swipe 手势 (跟 iOS 边缘 swipe 冲突)、PWA / service worker (设计师有服务器,不需要离线)
 - **2026-05-05 (5th revision today) sprite 缩到 4 方向 + schema 雏形定型**: 设计师跟 cute_pet 工程师对齐: **实际游戏只做 4 cardinal 方向** (south/east/north/west), 8 方向制图工作量 2× 但游戏端短期不需要。yellow_Shiba 第三轮 round 把磁盘 rotations 从 8 个砍到 4 个,animations 命名也剥掉 hash 后缀变 `idle / walk / yawn / sleeping / crouch`。asset-lab 这边:
   - **metadata.json sync 到磁盘** (`directions: 4`, drop 4 个对角线 rotation 条目)
   - **代码改成 sprite-driven 方向数**: `sprite_preview.js` 按 sprite 实际 rotations 过滤 face 键 (4-dir sprite 提示面板只显示 WASD); `preview/main.js` (Phaser) MOVE_KEYS 同步过滤 (4-dir sprite 玩家只 WASD 走, QEZC 静默, 跟"游戏只 4 方向"一致)
