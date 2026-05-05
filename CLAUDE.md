@@ -4,15 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository status
 
-Working MVP. Three pieces:
+Working MVP. Three pieces (long-term scope):
 
 1. **GitHub-based asset file management** — `assets/` directory holds all resources, designer drops files in, git tracks history. asset-lab does no special processing on most of it.
 2. **pixellab sprite → Tiled `.tsx` converter** (Python, [tools/](tools/)) — turns pixellab character exports into Tiled `.tsx` (image collection, 8-direction tiles with `direction` property). **Sprite-only**; map/tilemap conversion was deleted on 2026-05-05.
 3. **Browser sprite preview** (vanilla JS) — sprite_preview reads pixellab character `metadata.json` + 8 directional PNGs, supports keyboard interaction (8 directions + zoom). State-switching slot is reserved in code+keymap but **not implemented** (awaiting pixellab state export schema).
 
+Plus a **temporary scaffold**: **Browser level runtime preview** ([preview/](preview/), Phaser via CDN lazy-load). Lets the designer "walk around" a freshly-edited `.tmj` in the browser. **Will be removed** once cute_pet engineer ships `lib/demo/level_preview.dart`. Do NOT let `preview/` accrete business logic — it's a bridge, not a long-term home.
+
 [asset-lab-plan.md](asset-lab-plan.md) is the design doc + decision log; **read it before any non-trivial work**. Major scope shifts logged in its 修订记录:
 - 2026-05-05: dropped in-browser level preview (Tiled does this better)
 - 2026-05-05 (later same day): dropped pixellab Map Editor → .tmx converter (designer prefers Tiled directly; pixellab now only outputs basic PNG elements + sprites)
+- 2026-05-05 (later again): added `preview/` Phaser temporary scaffold for level runtime preview while cute_pet engineer waits for schema to stabilize
 
 ## What this tool is (and is NOT)
 
@@ -21,9 +24,10 @@ asset-lab is the **bridge layer** between pixellab.ai (resource generation) and 
 - ✅ git-managed asset directory
 - ✅ Sprite 8-direction preview (pixellab's web UI doesn't do keyboard interaction)
 - ✅ pixellab character → Tiled `.tsx` conversion (sprite-only)
-- ❌ **Not a level editor** — Tiled is. Designer installs Tiled and edits/exports .tmx directly.
+- ✅ Browser level runtime preview (`preview/`, Phaser, **temporary scaffold**) — lets designer walk around a `.tmj`. Cute_pet engineer will replace this with their own `lib/demo/level_preview.dart`
+- ❌ **Not a level editor** — Tiled is. Designer installs Tiled and edits/exports .tmj directly.
 - ❌ **Not a map converter** — pixellab Map Editor isn't in the pipeline anymore. If it comes back, the layered converter architecture means we add a parser; doesn't break sprite path.
-- ❌ **Not a game engine** — cute_pet uses Flame.
+- ❌ **Not a game engine** — cute_pet uses Flame. `preview/` uses Phaser only as a temporary scaffold to let designer "walk around"; it does NOT implement business logic, state machines, NPC AI, dialogue, inventory, etc.
 - ❌ **Not a Flutter/Dart project** — we hand cute_pet a spec, they implement it.
 
 ## Hard constraints (do not violate without explicit user sign-off)
@@ -50,14 +54,26 @@ These are load-bearing decisions, not preferences. From plan §9.
 - **Don't write Flutter/Dart code in this repo.** cute_pet is its own project. We write specs in [docs/cute_pet_integration.md](docs/cute_pet_integration.md), they implement.
 - **`assets/` subdirectory layout is owned by the designer.** When she finalizes Tiled-side conventions, asset-lab follows. Don't impose structure top-down.
 
+### `preview/` temporary scaffold rules
+
+`preview/` is a Phaser-based runtime so the designer can "walk around" a freshly edited `.tmj` without booting cute_pet. It's a **bridge**, not a permanent feature. Specific guardrails:
+
+- **Lazy-load Phaser via CDN `<script>` tag.** No npm, no bundling, no offline copy. The lazy load is intentional so the sprite-preview path stays fast and Phaser-free.
+- **Single-file `preview/main.js`.** Don't split into scene/player/etc. — small surface area, easier to delete entirely when cute_pet engineer ships their demo entry.
+- **Keep it boring.** Player walks, walls/furniture stop it, camera follows with two zoom levels. That's it. No state machines, NPC AI, dialogue, inventory, audio, save/load, mobile gestures, multi-level switching UI, etc. — those are all cute_pet's job.
+- **`.tmj` only (not `.tmx`).** Phaser eats Tiled JSON natively; flame_tiled also supports `.tmj`. Designer must Embed Tilesets when exporting.
+- **Don't add features intended for cute_pet to "reuse"** — Phaser JS and Flame Dart aren't interoperable. Code reuse via copy-paste is a fantasy here.
+- **When user says "cute_pet engineer wrote demo entry":** propose `git rm -r preview/` + revert `index.html` to single sprite-preview entry + mark plan §14.7 as "removed" + flip `docs/cute_pet_integration.md` accordingly. Do NOT keep `preview/` "just in case."
+
 ## Architecture
 
 ### Browser side
 - `core/` — `renderer.js` (pixel-purity + integer zoom), `input.js` (keymap-driven prompt panel), `version_guard.js` (export_version check).
 - `loaders/` — `sprite_loader.js`; `_image.js` (small shared `loadImage(src)` helper).
-- `modes/sprite_preview.js` — single mode. Has STATE SLOT block at top documenting how to wire up state switching when ready.
+- `modes/sprite_preview.js` — sprite-preview mode (vanilla JS Canvas). Has STATE SLOT block at top documenting how to wire up state switching when ready.
+- `preview/main.js` — level-preview mode (Phaser via CDN, **temporary scaffold**, see preview/README.md). Self-contained, doesn't reuse `core/`/`loaders/` deliberately.
 - `keymap.js` — only `SPRITE_KEYMAP`. Has STATE SLOT comment block showing where to add state-switch keybindings.
-- `index.html` — minimal entry, no mode toggle.
+- `index.html` — single entry, top button bar toggles between sprite preview and level preview. Persists choice via `?mode=...` query param. Lazy-imports `preview/main.js` only when level mode is selected.
 
 ### Converter side ([tools/](tools/))
 - `pixellab_to_tiled.py` — CLI orchestrator (sprite-only mode: `--sprites`).

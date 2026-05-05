@@ -8,7 +8,16 @@
 
 ## 修订记录
 
-- **2026-05-05 (later same day) pipeline 进一步收窄**: 设计师反馈 pixellab Map Editor / 关卡编辑都很难用,决定**只用 pixellab 出基础 PNG 元素 + 角色 sprite**,**地图和关卡完全在 Tiled 里画并导出 .tmx**。asset-lab 范围相应收窄到三件事:
+- **2026-05-05 (third revision today) 加 Phaser 关卡运行时预览 (临时拐杖)**: 设计师真痛点是 "改完 .tmj 想立刻跑起来玩, cute_pet 业务太重启动慢"。同时 cute_pet 工程师**有意识等 schema 稳定**才把 Tiled 工作流集成进主项目。折中: asset-lab 加 `preview/` 目录, 用 Phaser (CDN lazy-load) 跑最小关卡运行时:
+  - 加载 `.tmj` (Tiled JSON, **设计师导出时勾选 Embed Tilesets**)
+  - 玩家 8 方向 (WASD + QEZC) 走, 撞 walls object layer + 撞家具 (Arcade Physics 矩形)
+  - 相机两档 zoom (远景 2× / 近景 4×, 按 X 切换), 跟随玩家
+  - 缺资源 → 友好空态, 不启动 Phaser
+  - **关卡格式: .tmx → .tmj** (Phaser 默认吃 .tmj, flame_tiled 也支持。统一一种格式, asset-lab 不写 .tmx parser)
+  - **入口**: 统一从 `index.html` 进, 顶部 mode toggle (sprite preview / level preview), 持久化 via `?mode=...` query param
+  - **临时拐杖标签**: 加在 plan §14.7。**长期定位"三件事"不变** (§14.1)。cute_pet 工程师做出 `lib/demo/level_preview.dart` 后, asset-lab 这边整段 `git rm -r preview/`
+  - **架构原则**: preview/ 是 single-file 自成体系, 不复用 core/ / loaders/, 拆除时不拉扯 sprite preview
+- **2026-05-05 (later same day) pipeline 进一步收窄**: 设计师反馈 pixellab Map Editor / 关卡编辑都很难用,决定**只用 pixellab 出基础 PNG 元素 + 角色 sprite**,**地图和关卡完全在 Tiled 里画并导出 .tmx** (后改 .tmj, 见上一条)。asset-lab 范围相应收窄到三件事:
   - **基于 GitHub 的资源文件管理** (`assets/` 目录,设计师拖拽资源 + git 版本)
   - **pixellab sprite → Tiled `.tsx` 转换** (CLI 仅剩 `--sprites` 一个模式)
   - **Web 端 sprite 预览** (含 8 方向 + 缩放;状态切换槽位预留待实装)
@@ -614,10 +623,13 @@ asset_lab/
 
 | 约定 | 含义 | 谁产 |
 |---|---|---|
+| **关卡文件格式: .tmj** (Tiled JSON, Embed Tilesets) | Phaser preview / cute_pet flame_tiled 通用 | 设计师导出 |
 | sprite `.tsx` 里 tile property `direction` | "south" / "north-east" / 等 8 方向 | asset-lab converter |
 | `<objectgroup>`、`<imagelayer>`、tile collision、custom properties 等 | 关卡视觉、碰撞、家具摆放、地形语义 | 设计师在 Tiled 里直接画 |
+| `<objectgroup name="walls">` (临时约定) | 静态墙体 collision rects, asset-lab `preview/` 里 player 撞它 | 设计师在 Tiled 里建 |
+| tile property `collides:true` (临时约定) | 家具等 tile 级 collision, asset-lab `preview/` 自动识别 | 设计师在 Tiled tileset 编辑器里加 |
 
-asset-lab 不再约束 .tmx 的 layer 命名(原"walls / furniture"约定的 source of truth 转移到设计师那边)。cute_pet 端约定见 `docs/cute_pet_integration.md`(DRAFT,等设计师约定稳定后同步)。
+asset-lab 不强制 .tmj 的 layer 命名,但 `preview/` 临时拐杖**约定** `walls` 名字 (cute_pet 工程师后续接手时也按这个约定省事)。cute_pet 端约定见 `docs/cute_pet_integration.md`(DRAFT,等设计师约定稳定后同步)。
 
 ### 14.5 STATE SLOT(未实装)
 
@@ -636,14 +648,84 @@ asset-lab 不再约束 .tmx 的 layer 命名(原"walls / furniture"约定的 sou
 ### 14.6 不做的事(2026-05-05 后新增)
 
 - ❌ 重造 Tiled (关卡编辑全部交给 Tiled)
-- ❌ 自定义 level JSON schema(.tmx 即 schema)
-- ❌ pixellab Map Editor → .tmx 转换(已删除,设计师直接在 Tiled 画)
+- ❌ 自定义 level JSON schema(.tmj 即 schema)
+- ❌ pixellab Map Editor → .tmj 转换(已删除,设计师直接在 Tiled 画)
 - ❌ Tiled 二开 / fork
-- ❌ 浏览器内的关卡预览(Tiled 自带)
+- ❌ ⚠️ ~~浏览器内的关卡预览(Tiled 自带)~~ — **2026-05-05 第三次修订加回**: 浏览器内的关卡运行时预览作为**临时拐杖**实装(Phaser CDN, `preview/`),见 §14.7。Tiled 的静态预览不能让玩家"走起来",这条临时回滚针对 cute_pet schema 稳定前的过渡期
 - ❌ 替 cute_pet 写 Flutter / Dart 代码(只出 spec)
 - ❌ effect / audio 类型转换(等真有资源 + 格式确认)
 - ❌ 预先抽象 IR 类型(只有真实下游消费场景才加)
 - ❌ 强制 `assets/` 子目录布局(设计师定)
+
+### 14.7 临时拐杖: Phaser 关卡运行时预览
+
+**临时**, 不是长期定位的一部分。`preview/` 是 Phaser CDN lazy-load 实现的浏览器内关卡运行时, 让设计师改完 .tmj 立刻能在浏览器里"走一走"撞墙。具体见 [preview/README.md](preview/README.md)。
+
+#### 决策由来
+
+设计师真痛点: "改完 .tmj 想立刻跑起来玩, cute_pet 业务太重启动慢"。可选方案:
+- (A) 推进 cute_pet 工程师做 `lib/demo/level_preview.dart` minimal entry — 但 cute_pet 工程师**有意识等 schema 稳定**才整合 Tiled 工作流, 主项目代码不能频繁改动
+- (B) asset-lab 加 Phaser 临时拐杖, 设计师立刻可玩, 也不影响 cute_pet 节奏
+
+选 (B), 用户原话: "asset-lab 是中转轻量架构, 任何架构层面的改动都 open"。
+
+#### 引擎选择
+
+**Phaser 3.x via CDN `<script>`**, 不引 npm。理由:
+- Tiled 一等公民, .tmj 直接吃
+- Arcade Physics 内置, 玩家撞墙一行
+- pixelArt + roundPixels 内置, 像素纯度有保障
+- 设计师不装 Flutter / Node, 浏览器即用
+- ESM lazy-load: 切到 level mode 才 fetch CDN, sprite preview 路径不受影响
+
+**不选 Flame Web** (Flutter SDK 太重, build pipeline 维护成本高), **不选 Excalibur / Kaboom** (Tiled 生态不如 Phaser 完整)。
+
+#### 范围(严格框死)
+
+✅ 做:
+- 加载 .tmj
+- 玩家 8 方向移动 + Arcade Physics 矩形碰撞
+- 撞 walls object layer + tile-property `collides:true` 的家具
+- 相机两档 zoom (远景 2× / 近景 4×, 按 X 切换), 跟随玩家
+- 缺资源 → 友好空态, 不启动 Phaser
+
+❌ 不做(关键):
+- 业务逻辑 / 状态机 / 任务 / 对话 / 背包 / NPC AI
+- sprite 状态切换 (沿用 sprite_preview 的 STATE SLOT 策略)
+- sprite 走路动画播放 (frames.animations 当前为空)
+- 多关卡切换 UI (?map=xxx.tmj 是逃生口)
+- NPC sprite 渲染
+- 触发器 / 场景跳转
+- 音频
+- 把 preview runtime 代码"复用给 cute_pet" (JS ↔ Dart 不互通, 别幻想)
+
+#### 拆除条件
+
+cute_pet 工程师在 cute_pet 仓写出 `lib/demo/level_preview.dart` (~200 行 Dart, 仅加载 .tmj + 玩家走 + 撞墙) 并跑通后, asset-lab 这边整段拆除:
+
+1. `git rm -r preview/`
+2. `index.html` 移除 `level preview` mode 按钮 + 改回单一 sprite preview entry
+3. 本节 (§14.7) 标 ARCHIVED, 保留作历史决策记录, 不删除
+4. README / CLAUDE.md 同步删除 preview runtime 章节
+5. `docs/cute_pet_integration.md` 把 "asset-lab preview runtime" 相关章节标 ARCHIVED
+
+**不维护双份。** 一旦 cute_pet 接手, asset-lab 这边的 preview runtime 立刻退场。
+
+#### 关卡格式: .tmj 而非 .tmx
+
+之前(2026-05-05 第二次修订)约定 .tmx, 本次改 .tmj。原因:
+- Phaser 默认吃 .tmj (`load.tilemapTiledJSON`), 直接用 .tmx 要先转一道
+- flame_tiled 同样支持 .tmj (`TiledComponent.load('foo.tmj', ...)`), 跟 .tmx 等价
+- 统一一种格式, asset-lab 不需写 .tmx → .tmj 转换器
+- 设计师导出: Tiled File > Save As 选 .tmj, 或 Export As > JSON map files (*.tmj)
+
+**约定**: 设计师导出 .tmj 时**勾选 "Embed Tilesets"** (.tmj 自包含 tileset 数据), 否则 Phaser 不能直接吃外部 .tsx 引用 (preview 当前不支持外部 .tsx)。
+
+#### 输入: 入口 + 模式切换
+
+`index.html` 顶部 mode toggle (sprite preview / level preview), 默认 sprite。切到 level 时 lazy-import `preview/main.js`, 它再 lazy-load Phaser CDN。模式持久化通过 `?mode=level` query param。
+
+为未来加更多模式留扩展空间: 加新 mode 只需 (a) 加按钮 (b) 在 switchTo 加 case (c) 加 import。当前不抽象成"mode registry"等结构, 等真要 3+ 模式再说。
 
 ---
 
