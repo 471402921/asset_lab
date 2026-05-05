@@ -4,21 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository status
 
-Working MVP. Two functional pieces:
+Working MVP. Three pieces:
 
-1. **Browser sprite preview** (vanilla JS) — sprite_preview mode reads pixellab character `metadata.json` + 8 directional PNGs, supports keyboard interaction. Empty-state until designer drops in a real sprite.
-2. **pixellab → Tiled converter** (Python, in [tools/](tools/)) — turns pixellab Map Editor exports and pixellab character exports into Tiled `.tmx` / `.tsx` files that `flame_tiled` can directly consume.
+1. **GitHub-based asset file management** — `assets/` directory holds all resources, designer drops files in, git tracks history. asset-lab does no special processing on most of it.
+2. **pixellab sprite → Tiled `.tsx` converter** (Python, [tools/](tools/)) — turns pixellab character exports into Tiled `.tsx` (image collection, 8-direction tiles with `direction` property). **Sprite-only**; map/tilemap conversion was deleted on 2026-05-05.
+3. **Browser sprite preview** (vanilla JS) — sprite_preview reads pixellab character `metadata.json` + 8 directional PNGs, supports keyboard interaction (8 directions + zoom). State-switching slot is reserved in code+keymap but **not implemented** (awaiting pixellab state export schema).
 
-[asset-lab-plan.md](asset-lab-plan.md) is the design doc + decision log; **read it before any non-trivial work**. Major scope shift on 2026-05-05: dropped the in-browser level preview (Tiled does this better). See plan's 修订记录 section.
+[asset-lab-plan.md](asset-lab-plan.md) is the design doc + decision log; **read it before any non-trivial work**. Major scope shifts logged in its 修订记录:
+- 2026-05-05: dropped in-browser level preview (Tiled does this better)
+- 2026-05-05 (later same day): dropped pixellab Map Editor → .tmx converter (designer prefers Tiled directly; pixellab now only outputs basic PNG elements + sprites)
 
 ## What this tool is (and is NOT)
 
 asset-lab is the **bridge layer** between pixellab.ai (resource generation) and cute_pet (the game, Flutter+Flame+GetX).
 
-- ✅ Sprite 8-direction preview that pixellab's web UI doesn't do
-- ✅ pixellab → Tiled conversion (Map Editor exports + character exports)
-- ✅ Asset organization via git (`assets/`)
-- ❌ **Not a level editor** — Tiled is. Designer installs Tiled.
+- ✅ git-managed asset directory
+- ✅ Sprite 8-direction preview (pixellab's web UI doesn't do keyboard interaction)
+- ✅ pixellab character → Tiled `.tsx` conversion (sprite-only)
+- ❌ **Not a level editor** — Tiled is. Designer installs Tiled and edits/exports .tmx directly.
+- ❌ **Not a map converter** — pixellab Map Editor isn't in the pipeline anymore. If it comes back, the layered converter architecture means we add a parser; doesn't break sprite path.
 - ❌ **Not a game engine** — cute_pet uses Flame.
 - ❌ **Not a Flutter/Dart project** — we hand cute_pet a spec, they implement it.
 
@@ -31,32 +35,34 @@ These are load-bearing decisions, not preferences. From plan §9.
 - **pixellab `metadata.json` is upstream contract.** Never change field semantics. Hard-error on `export_version !== "2.0"`.
 - **Direction strings stay raw.** Use pixellab's literal `south`, `south-east`, `east`, ... in code. Do NOT translate to `N/E/S/W`.
 - **Pixel purity is P0.** `ctx.imageSmoothingEnabled = false` AND CSS `image-rendering: pixelated`. Zoom is integer-only (2/3/4/6/8, default 4). Reject non-integer zoom.
+- **STATE SLOT placeholder, no impl.** sprite_preview.js has a STATE SLOT block at top of file, with hooks in `_dispatch`/`constructor`/`keymap.js`. Do NOT implement state switching by guessing schema — wait for real pixellab state export samples and update plan §13/§14 schema first.
 
 ### Converter side (Python in tools/)
-- **Layered architecture is load-bearing.** `tools/converters/` has three sections: `pixellab/` (parsers), `ir.py` (tool-agnostic intermediate representation), `tiled/` (writers). **Parsers must not import from writers, and vice versa.** Future migration (pixellab → some other tool, or Tiled → Phaser format) only swaps one side. Verify with `grep -rn pixellab tools/converters/tiled/` (must be empty modulo docstrings).
+- **Layered architecture is load-bearing.** `tools/converters/` has three sections: `pixellab/` (parsers), `ir.py` (tool-agnostic intermediate representation), `tiled/` (writers). **Parsers must not import from writers, and vice versa.** Future migration (pixellab → some other tool, or Tiled → another engine target) only swaps one side. Verify with `grep -rn pixellab tools/converters/tiled/` (must be empty modulo docstrings).
 - **Stdlib only.** No pip dependencies. Same "zero deps" spirit as browser side.
 - **CLI must be safe to re-run** (idempotent, overwrites cleanly).
-- **`temporary_asset/` is a workflow buffer, never source of truth.** Contents are in `.gitignore`. Designer drops pixellab exports here, runs converter, output goes into `assets/`. The original pixellab exports live in pixellab.ai itself, not in this repo.
+- **`temporary_asset/` is a workflow buffer, never source of truth.** Contents are in `.gitignore`. Originally for pixellab raw exports; current usage is minimal since pipeline narrowed. Don't store assets here.
+- **Don't add IR types speculatively.** TileMap/ImageLayer/etc. were deleted when their use case (map converter) went away. Only add IR types when there's a real consumer. The architecture's value is enabling future addition cheaply, not having lots of types preemptively.
 
 ### Cross-cutting
 - **Don't replace Tiled.** No in-browser level editor. No level JSON schema. If feature seems to need it, push back to "let designer use Tiled."
+- **Don't reintroduce map conversion.** Designer dropped it deliberately. If feature seems to need it, ask the user why first.
 - **Don't write Flutter/Dart code in this repo.** cute_pet is its own project. We write specs in [docs/cute_pet_integration.md](docs/cute_pet_integration.md), they implement.
+- **`assets/` subdirectory layout is owned by the designer.** When she finalizes Tiled-side conventions, asset-lab follows. Don't impose structure top-down.
 
 ## Architecture
 
 ### Browser side
 - `core/` — `renderer.js` (pixel-purity + integer zoom), `input.js` (keymap-driven prompt panel), `version_guard.js` (export_version check).
-- `loaders/` — `sprite_loader.js` (the only one left after Tiled adoption); `_image.js` (small shared `loadImage(src)` helper).
-- `modes/sprite_preview.js` — single mode now (level preview was dropped).
-- `keymap.js` — only `SPRITE_KEYMAP` left.
+- `loaders/` — `sprite_loader.js`; `_image.js` (small shared `loadImage(src)` helper).
+- `modes/sprite_preview.js` — single mode. Has STATE SLOT block at top documenting how to wire up state switching when ready.
+- `keymap.js` — only `SPRITE_KEYMAP`. Has STATE SLOT comment block showing where to add state-switch keybindings.
 - `index.html` — minimal entry, no mode toggle.
 
 ### Converter side ([tools/](tools/))
-- `pixellab_to_tiled.py` — CLI orchestrator. Handles file copies, output paths, calls parsers + writers.
-- `converters/ir.py` — `TileMap`, `ImageLayer`, `ObjectLayer`, `MapObject`, `Sprite`, `SpriteFrame` dataclasses. **Tool-agnostic.**
-- `converters/pixellab/parse_map.py` — pixellab Map Editor export → `IR.TileMap` (image layer + walls/furniture object layers) + auxiliary terrain grid for sidecar JSON.
+- `pixellab_to_tiled.py` — CLI orchestrator (sprite-only mode: `--sprites`).
+- `converters/ir.py` — `Sprite`, `SpriteFrame` dataclasses. Tool-agnostic. Slim now; grow only with real consumers.
 - `converters/pixellab/parse_sprite.py` — pixellab character export → `IR.Sprite` (8 frames with `direction` property each).
-- `converters/tiled/write_tmx.py` — IR → Tiled `.tmx` XML.
 - `converters/tiled/write_tsx.py` — IR → Tiled `.tsx` XML (image collection style).
 
 See [tools/converters/README.md](tools/converters/README.md) for the decoupling rules and how to add a new source/target.
@@ -71,7 +77,6 @@ python3 -m http.server 8000      # or `npx serve`, or VS Code Live Server
 
 ### Converter
 ```bash
-python3 tools/pixellab_to_tiled.py --map-input "temporary_asset/{export}/" --name {map_name}
 python3 tools/pixellab_to_tiled.py --sprites
 ```
 
@@ -79,12 +84,14 @@ There is no test suite, no lint, no CI. This is a debugging/conversion tool, not
 
 ## Working with the designer
 
-Primary user is one designer using Claude Code in VS Code + Tiled (GUI level editor) + pixellab (asset generation).
+Primary user is one designer using Claude Code in VS Code + Tiled (GUI level editor) + pixellab (sprite + basic PNG generation).
 
 - **Sprite preview tweaks**: if designer wants "show animation FPS" or "switch sprite via Tab", that's vibe-code-able in `modes/sprite_preview.js` (~30-80 LOC at a time, per plan §9).
+- **State switching**: when she comes back with real pixellab state samples, follow the implementation steps in the STATE SLOT comment block at top of sprite_preview.js. Do NOT pre-implement.
 - **Converter changes**: if a new pixellab field appears or a new Tiled convention is needed, that's a converter change. Stay in the parser/writer split; don't blob logic into the CLI orchestrator.
 - **Don't touch `temporary_asset/`** when restructuring directories — that's the designer's drop zone.
-- **If the request is "preview a level in the browser,"** redirect to "open .tmx in Tiled" instead. Don't reintroduce level_preview.
+- **If the request is "preview a level in the browser"**, redirect to "open .tmx in Tiled" instead. Don't reintroduce level_preview.
+- **If the request is "convert this pixellab Map Editor export"**, redirect to "let designer rebuild in Tiled directly". Don't reintroduce map converter.
 
 ## pixellab MCP
 

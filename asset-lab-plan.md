@@ -8,6 +8,14 @@
 
 ## 修订记录
 
+- **2026-05-05 (later same day) pipeline 进一步收窄**: 设计师反馈 pixellab Map Editor / 关卡编辑都很难用,决定**只用 pixellab 出基础 PNG 元素 + 角色 sprite**,**地图和关卡完全在 Tiled 里画并导出 .tmx**。asset-lab 范围相应收窄到三件事:
+  - **基于 GitHub 的资源文件管理** (`assets/` 目录,设计师拖拽资源 + git 版本)
+  - **pixellab sprite → Tiled `.tsx` 转换** (CLI 仅剩 `--sprites` 一个模式)
+  - **Web 端 sprite 预览** (含 8 方向 + 缩放;状态切换槽位预留待实装)
+  - **删除**: `tools/converters/pixellab/parse_map.py`、`tools/converters/tiled/write_tmx.py`、IR 的 `TileMap / ImageLayer / ObjectLayer / MapObject`,以及 e2e 演示产物 `assets/maps/pixellab_demo_001.tmx`、`assets/tilesets/pixellab_demo_001/*`
+  - **未删**: `tools/converters/` 分层架构(parser/IR/writer 三段),即便现在只剩 sprite 一条 pipeline,架构本身保留。未来加新 source/target 仍按本文 §14.3 的契约扩展
+  - **新增**: `modes/sprite_preview.js` + `keymap.js` 加 STATE SLOT 注释槽位 — 设计师未来要在 web 端模拟宠物各种状态(健康/受伤/睡觉等),等 pixellab 状态导出 schema 定型后实装
+  - 本次变更不涉及目录结构。`assets/` 子目录约定由设计师定(她在 Tiled 里习惯什么布局就用什么),asset-lab 跟随
 - **2026-05-05 引入 Tiled, asset-lab 收缩定位**: 设计师从 pixellab Map Editor 导出第一份真实 tilemap 后,发现"自己造关卡编辑器"的方向是重造 Tiled 轮子。重决:
   - **关卡编辑器: Tiled (stock,不二开)**。设计师 `brew install --cask tiled`,在 Tiled 里拖拽编辑 .tmx
   - **关卡 schema: Tiled .tmx 标准** (放弃自定义 entity-unified JSON)
@@ -17,6 +25,7 @@
   - **目录**: `temporary_asset/` 升到仓根 (workflow buffer,内容 .gitignore);`assets/tilesets/`、`assets/maps/(.tmx)` 取代之前的 `assets/{items,ui,maps(.png),tilemaps}/`
   - **家具 collision**: 由 Tiled per-tile collision shape 处理 (Tiled .tsx 自带能力),不再发明 sidecar metadata.json
   - 本文以下章节标 ⚠️ DEPRECATED 的部分已被实际实现替代;以新增的 §14 和 README / CLAUDE.md / docs/cute_pet_integration.md 为准
+  - ⚠️ **同日 later 部分被进一步收窄**: pixellab Map Editor 转换路径删除,见上一条修订记录
 - **2026-05-04 术语对齐**: "场景 / scene" 被拆分为两个不重叠概念以消除歧义。
   - **关卡 / level** = 多资源组合(顶层 JSON,目录 `levels/`)。曾用名 "场景 / scene"。
   - **地图 / map** = 全图背景资源类型(目录 `assets/maps/`,pixellab `create_map` 生成)。曾用名 "scene(背景)"。
@@ -555,78 +564,86 @@ assets/sprites/husky_chibi/
 
 ---
 
-## 14. 当前实装(2026-05-05 起,Tiled 引入后)
+## 14. 当前实装(2026-05-05 起,Tiled 引入 + 范围进一步收窄后)
 
 ⚠️ 以下内容**取代** §3 的 entity-unified 模型、§5 的旧目录结构、§6 的 level preview 部分。§13 sprite 部分仍有效。
 
-### 14.1 实际运行的两件事
+### 14.1 实际运行的三件事
 
-1. **浏览器 sprite preview**(纯 vanilla JS,只剩这一个浏览器模式)
-2. **pixellab → Tiled converter**(Python,在 `tools/`)
+1. **基于 GitHub 的资源文件管理** — `assets/` 目录由设计师拖拽资源 + git 版本管理,asset-lab 不做特殊处理
+2. **pixellab sprite → Tiled `.tsx` 转换** — Python CLI,只剩 `--sprites` 一个模式
+3. **浏览器 sprite preview** — 纯 vanilla JS,8 方向 + 缩放;状态切换槽位预留待实装
 
-关卡编辑由 **Tiled** 完成,设计师 `brew install --cask tiled`。cute_pet 用 `flame_tiled` 加载 .tmx。
+地图和关卡编辑由设计师在 **Tiled** 里直接做并导出 `.tmx`,asset-lab 不参与转换。pixellab 在工作流里只产基础 PNG 元素 + 角色 sprite。cute_pet 用 `flame_tiled` 加载 `.tmx`。
 
 ### 14.2 当前目录结构
 
 ```
 asset_lab/
-├── assets/
-│   ├── maps/                 # Tiled .tmx 关卡
-│   ├── tilesets/             # Tiled .tsx + 引用的 PNG
-│   │   ├── {name}/           #   pixellab Map Editor 转换出
-│   │   │   ├── composite.png
-│   │   │   ├── terrain-info.json
-│   │   │   └── tiles/*.png
-│   │   ├── furniture/        #   image collection,设计师在 Tiled 配 collision
-│   │   ├── items/
-│   │   └── ui/
-│   ├── sprites/{name}/       # pixellab metadata.json + rotations/ + .tsx
+├── assets/                   # 设计师投放区, 子目录约定由设计师定 (跟随 Tiled 工程惯例)
+│   ├── maps/                 # 设计师从 Tiled 导出的 .tmx + 引用的 PNG
+│   ├── tilesets/             # 设计师在 Tiled 里建的 .tsx + tile PNG (基础 PNG 来自 pixellab)
+│   ├── sprites/{name}/       # pixellab character: metadata.json + rotations/ + .tsx
 │   └── audio/{music,sfx}/
-├── temporary_asset/          # workflow buffer,内容 .gitignore
+├── temporary_asset/          # workflow buffer, 内容 .gitignore
 ├── tools/
-│   ├── pixellab_to_tiled.py
-│   └── converters/{ir.py, pixellab/, tiled/}
-├── docs/cute_pet_integration.md
-├── modes/sprite_preview.js
+│   ├── pixellab_to_tiled.py  # CLI, 只剩 --sprites
+│   └── converters/{ir.py, pixellab/parse_sprite.py, tiled/write_tsx.py}
+├── docs/cute_pet_integration.md  # 给 cute_pet 工程师的契约 (DRAFT)
+├── modes/sprite_preview.js   # 含 STATE SLOT 注释槽位
 ├── core/{renderer,input,version_guard}.js
 ├── loaders/{sprite_loader,_image}.js
-├── keymap.js (只剩 SPRITE_KEYMAP)
-└── index.html (只挂 sprite preview)
+├── keymap.js                 # 只剩 SPRITE_KEYMAP, 含 STATE SLOT 注释
+└── index.html                # 只挂 sprite preview
 ```
 
 ### 14.3 Converter 分层架构(为换源/换目标解耦)
 
 ```
-[pixellab export] → parsers/pixellab/* → IR → writers/tiled/* → [.tmx, .tsx]
+[pixellab character export] → parsers/pixellab/parse_sprite.py → IR.Sprite → writers/tiled/write_tsx.py → .tsx
 ```
 
-- IR (`tools/converters/ir.py`) 是工具无关 dataclass:`TileMap`、`ImageLayer`、`ObjectLayer`、`MapObject`、`Sprite`、`SpriteFrame`
+- IR (`tools/converters/ir.py`) 是工具无关 dataclass:**目前只有** `Sprite` / `SpriteFrame`(原 `TileMap` 等已删,因 pixellab Map Editor 不在 pipeline 内)
 - parsers MUST 输出 IR,**不**直接拼 XML
 - writers MUST 消费 IR,**不**读 pixellab 原始格式
 - parsers 和 writers 互不 import
 
-详细见 `tools/converters/README.md`。
+虽然现在只有一条 sprite pipeline,**分层契约不能塌方**。它是给"未来加新 source / target 时不重构"准备的(例如 pixellab v2、别的工具、Phaser format 等)。详细见 `tools/converters/README.md`。
 
 ### 14.4 Tiled 约定
 
-| 约定 | 含义 |
-|---|---|
-| `<imagelayer name="background">` | pixellab 渲染的关卡整图 |
-| `<objectgroup name="walls">` | 静态墙体 collision rects(converter 自动生成) |
-| `<objectgroup name="furniture">` | 设计师在 Tiled 里摆放的家具 tile object |
-| sprite `.tsx` 里 tile property `direction` | "south" / "north-east" / 等 8 方向之一 |
-| sidecar `terrain-info.json` | 紧凑 width×height grid,每格 terrain ID,cute_pet 可选查询 |
+| 约定 | 含义 | 谁产 |
+|---|---|---|
+| sprite `.tsx` 里 tile property `direction` | "south" / "north-east" / 等 8 方向 | asset-lab converter |
+| `<objectgroup>`、`<imagelayer>`、tile collision、custom properties 等 | 关卡视觉、碰撞、家具摆放、地形语义 | 设计师在 Tiled 里直接画 |
 
-详细 cute_pet 端约定见 `docs/cute_pet_integration.md`。
+asset-lab 不再约束 .tmx 的 layer 命名(原"walls / furniture"约定的 source of truth 转移到设计师那边)。cute_pet 端约定见 `docs/cute_pet_integration.md`(DRAFT,等设计师约定稳定后同步)。
 
-### 14.5 不做的事(2026-05-05 后新增)
+### 14.5 STATE SLOT(未实装)
+
+设计师未来希望在 web 端模拟 sprite 的所有状态(宠物状态多: 健康/受伤/睡觉/开心 等)。等 pixellab 状态导出 schema 定型后再实装。代码槽位已预留在:
+
+- `modes/sprite_preview.js` 顶部 STATE SLOT 注释块 + `this.state` 字段 + `_dispatch` 'state' 分支(目前 warn)
+- `keymap.js` STATE SLOT 注释段(取消注释 + 加具体绑定)
+- `loaders/sprite_loader.js`(等 metadata 出 states 字段时挂出来)
+
+实装步骤(等触发):
+1. 拿到 pixellab 真实状态导出样本,更新本节 + §13 schema 章节
+2. sprite_loader.js 加 states 解析
+3. keymap.js 真添加状态切换键(Digit1..Digit9 之类)
+4. sprite_preview.js `_dispatch` 实装 'state',`_render` 按 state 选 frame,`_showInfo` 显示 state
+
+### 14.6 不做的事(2026-05-05 后新增)
 
 - ❌ 重造 Tiled (关卡编辑全部交给 Tiled)
 - ❌ 自定义 level JSON schema(.tmx 即 schema)
-- ❌ Tiled 二开 / fork(stock 够用,需要时写 ~50 行 .js extension)
+- ❌ pixellab Map Editor → .tmx 转换(已删除,设计师直接在 Tiled 画)
+- ❌ Tiled 二开 / fork
 - ❌ 浏览器内的关卡预览(Tiled 自带)
 - ❌ 替 cute_pet 写 Flutter / Dart 代码(只出 spec)
 - ❌ effect / audio 类型转换(等真有资源 + 格式确认)
+- ❌ 预先抽象 IR 类型(只有真实下游消费场景才加)
+- ❌ 强制 `assets/` 子目录布局(设计师定)
 
 ---
 
