@@ -46,17 +46,6 @@
           "animations/walk/south/frame_008.png"
         ],
         "east": [
-          "animations/walk/west/frame_000.png",
-          "animations/walk/west/frame_001.png",
-          "animations/walk/west/frame_002.png",
-          "animations/walk/west/frame_003.png",
-          "animations/walk/west/frame_004.png",
-          "animations/walk/west/frame_005.png",
-          "animations/walk/west/frame_006.png",
-          "animations/walk/west/frame_007.png",
-          "animations/walk/west/frame_008.png"
-        ],
-        "west": [
           "animations/walk/east/frame_000.png",
           "animations/walk/east/frame_001.png",
           "animations/walk/east/frame_002.png",
@@ -66,6 +55,17 @@
           "animations/walk/east/frame_006.png",
           "animations/walk/east/frame_007.png",
           "animations/walk/east/frame_008.png"
+        ],
+        "west": [
+          "animations/walk/west/frame_000.png",
+          "animations/walk/west/frame_001.png",
+          "animations/walk/west/frame_002.png",
+          "animations/walk/west/frame_003.png",
+          "animations/walk/west/frame_004.png",
+          "animations/walk/west/frame_005.png",
+          "animations/walk/west/frame_006.png",
+          "animations/walk/west/frame_007.png",
+          "animations/walk/west/frame_008.png"
         ],
         "north": [
           "animations/walk/north/frame_000.png",
