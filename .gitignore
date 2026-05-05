@@ -10,3 +10,7 @@ temporary_asset/*
 !temporary_asset/.gitkeep
 
 .claude/
+
+# TLS material for the deploy box (generated on remote, never tracked)
+cert.pem
+key.pem

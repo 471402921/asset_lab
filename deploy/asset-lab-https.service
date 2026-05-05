@@ -1,0 +1,14 @@
+[Unit]
+Description=asset-lab static HTTPS preview server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ubuntu/asset_lab
+ExecStart=/usr/bin/python3 /home/ubuntu/asset_lab/_https_server.py
+Restart=on-failure
+RestartSec=2
+User=root
+
+[Install]
+WantedBy=multi-user.target
