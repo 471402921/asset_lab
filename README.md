@@ -80,7 +80,13 @@ npx serve
 
 ### 手机预览 (触屏自动启用)
 
-支持手机浏览器跑 sprite + level preview。把 asset-lab 部署到 HTTP 服务器后,手机访问该 URL 即可。
+支持手机浏览器跑 sprite + level preview。**已部署在 <https://1.14.190.95/>**(自签证书,首次访问浏览器会跳"不安全"警告页 → "高级" → "继续"即可)。改完代码本机一行 redeploy:
+
+```bash
+./deploy.sh deploy
+```
+
+部署细节、systemd unit、为什么走 HTTPS+443 都在 [deploy.sh](deploy.sh) 头部注释里。
 
 - **触发条件**: 媒体查询 `(pointer: coarse), (max-width: 900px)` 命中即开触屏 UI
 - **桌面零回归**: 大屏 + 鼠标 (`pointer: fine`) 行为完全跟之前一样,触屏 UI 自动隐藏

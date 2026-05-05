@@ -102,6 +102,22 @@ python3 tools/pixellab_to_tiled.py --sprites
 
 There is no test suite, no lint, no CI. This is a debugging/conversion tool, not a product.
 
+## Deployment
+
+Live preview at **<https://1.14.190.95/>** (Tencent Cloud CVM, self-signed cert — designer click-throughs the warning). One-line redeploy after editing code:
+
+```bash
+./deploy.sh deploy            # rsync → systemctl restart asset-lab-https → curl verify
+```
+
+Other [`deploy.sh`](deploy.sh) subcommands: `ssh` / `run "<cmd>"` / `ping`. Server-side runtime is a systemd unit ([deploy/asset-lab-https.service](deploy/asset-lab-https.service)) running [`_https_server.py`](_https_server.py) — a 12-line TLS-wrapped `SimpleHTTPServer` on :443. Logs via `./deploy.sh run 'sudo journalctl -u asset-lab-https -n 50 --no-pager'`.
+
+Hard rules around deploy:
+- **Don't reinvent.** All deploy state (host, user, key, port choice, systemd unit) is documented in `deploy.sh`'s header comment. Read it first; don't re-derive.
+- **HTTPS on :443 is forced by the security group**, not by HTTP-protocol filtering. The security group on this CVM only opens 22 / 443 / 22940 / 18789. Other ports look reachable (`nc -zv` says "succeeded") but the cloud edge spoofs the TCP handshake and silently drops data — so don't waste time on `python3 -m http.server 8000` thinking it'll work externally. To use a different port: 控制台 → 安全组 → 入站规则.
+- **`cert.pem` / `key.pem` live only on the remote** (generated once with `openssl`, gitignored). `deploy` doesn't overwrite them.
+- **`_https_server.py` and `deploy/asset-lab-https.service` ARE tracked** — they're the deploy contract.
+
 ## Working with the designer
 
 Primary user is one designer using Claude Code in VS Code + Tiled (GUI level editor) + pixellab (sprite + basic PNG generation).
