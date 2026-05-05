@@ -2,6 +2,7 @@
 <html lang="zh">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>asset-lab</title>
   <style>
     body {
@@ -9,6 +10,7 @@
       background: #1a1a1a;
       color: #ddd;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      overflow-x: hidden;
     }
     header {
       display: flex;
@@ -47,6 +49,8 @@
     #game {
       display: none;
       border: 1px solid #333;
+      width: 640px;
+      height: 640px;
     }
     #game canvas { border: none; }
     #info {
@@ -54,6 +58,7 @@
       background: rgba(0,0,0,0.7); padding: 8px 12px;
       font-size: 12px; border-radius: 4px;
       pointer-events: none; max-width: 60%;
+      z-index: 10;
     }
     #info:empty, #prompt:empty { display: none; }
     #prompt {
@@ -62,6 +67,7 @@
       font-size: 11px; border-radius: 4px;
       max-width: 320px; pointer-events: none;
       line-height: 1.5;
+      z-index: 10;
     }
     #prompt .kg { margin: 2px 0; }
     #prompt b { color: #6b8dc7; }
@@ -72,11 +78,165 @@
       background: #2a2a2a; padding: 24px 32px;
       border: 1px solid #555; border-radius: 6px;
       max-width: 520px;
+      z-index: 20;
     }
     #empty h2 { margin-top: 0; }
     #empty code {
       background: #111; padding: 2px 6px;
       border-radius: 3px; font-size: 12px; color: #f0c674;
+    }
+
+    /* ─── Touch UI (mobile / coarse pointer only) ───────────────────────────── */
+    .touch-only { display: none; }
+    .tbtn {
+      background: #333;
+      color: #ddd;
+      border: 1px solid #555;
+      border-radius: 6px;
+      width: 56px;
+      height: 56px;
+      font-size: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      padding: 0;
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .tbtn:active, .tbtn.pressed { background: #4a6da7; border-color: #6b8dc7; }
+    .tbtn[disabled] { opacity: 0.3; }
+
+    /* sprite-touch (stacked below canvas) */
+    #sprite-touch {
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 8px 16px;
+      background: #1a1a1a;
+      border-top: 1px solid #2a2a2a;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    #sprite-touch .state-strip {
+      display: flex; gap: 6px;
+      overflow-x: auto;
+      max-width: 100%;
+      padding: 4px 8px;
+      -webkit-overflow-scrolling: touch;
+    }
+    #sprite-touch .state-strip button {
+      flex-shrink: 0;
+      padding: 8px 14px;
+      background: #333;
+      color: #ddd;
+      border: 1px solid #555;
+      border-radius: 16px;
+      font-size: 12px;
+      cursor: pointer;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #sprite-touch .state-strip button.active {
+      background: #4a6da7; border-color: #6b8dc7; color: #fff;
+    }
+    #sprite-touch .row { display: flex; gap: 8px; align-items: center; }
+    #sprite-touch .dpad {
+      display: grid;
+      grid-template-columns: repeat(3, 52px);
+      grid-template-rows: repeat(3, 52px);
+      gap: 4px;
+    }
+    #sprite-touch .dpad .tbtn { width: 52px; height: 52px; font-size: 18px; }
+    #sprite-touch .dpad [data-dir="north"]      { grid-column: 2; grid-row: 1; }
+    #sprite-touch .dpad [data-dir="west"]       { grid-column: 1; grid-row: 2; }
+    #sprite-touch .dpad [data-dir="east"]       { grid-column: 3; grid-row: 2; }
+    #sprite-touch .dpad [data-dir="south"]      { grid-column: 2; grid-row: 3; }
+    #sprite-touch .dpad [data-dir="north-west"] { grid-column: 1; grid-row: 1; }
+    #sprite-touch .dpad [data-dir="north-east"] { grid-column: 3; grid-row: 1; }
+    #sprite-touch .dpad [data-dir="south-west"] { grid-column: 1; grid-row: 3; }
+    #sprite-touch .dpad [data-dir="south-east"] { grid-column: 3; grid-row: 3; }
+    /* Hidden 8-dir buttons in 4-dir mode (sprite-driven via JS) */
+    #sprite-touch .dpad button[hidden] { display: none; }
+
+    #sprite-touch .controls-side {
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    #sprite-touch .playback { display: flex; gap: 6px; }
+    #sprite-touch .zoom { display: flex; gap: 6px; }
+
+    /* level-touch (floating overlay on Phaser) */
+    #level-touch { pointer-events: none; }
+    #level-touch .dpad {
+      position: fixed;
+      bottom: 20px; left: 20px;
+      display: grid;
+      grid-template-columns: repeat(3, 56px);
+      grid-template-rows: repeat(3, 56px);
+      gap: 4px;
+      z-index: 30;
+    }
+    #level-touch .dpad .tbtn {
+      pointer-events: auto;
+      background: rgba(51,51,51,0.78);
+      backdrop-filter: blur(2px);
+      -webkit-backdrop-filter: blur(2px);
+    }
+    #level-touch .dpad .tbtn:active, #level-touch .dpad .tbtn.pressed {
+      background: rgba(74,109,167,0.9);
+    }
+    #level-touch .dpad [data-dir="north"]      { grid-column: 2; grid-row: 1; }
+    #level-touch .dpad [data-dir="west"]       { grid-column: 1; grid-row: 2; }
+    #level-touch .dpad [data-dir="east"]       { grid-column: 3; grid-row: 2; }
+    #level-touch .dpad [data-dir="south"]      { grid-column: 2; grid-row: 3; }
+    #level-touch .dpad [data-dir="north-west"] { grid-column: 1; grid-row: 1; }
+    #level-touch .dpad [data-dir="north-east"] { grid-column: 3; grid-row: 1; }
+    #level-touch .dpad [data-dir="south-west"] { grid-column: 1; grid-row: 3; }
+    #level-touch .dpad [data-dir="south-east"] { grid-column: 3; grid-row: 3; }
+    #level-touch .dpad button[hidden] { display: none; }
+
+    #level-touch #level-zoom {
+      position: fixed;
+      bottom: 20px; right: 20px;
+      width: 64px; height: 64px;
+      font-size: 22px;
+      border-radius: 50%;
+      background: rgba(51,51,51,0.78);
+      color: #ddd;
+      border: 1px solid #555;
+      pointer-events: auto;
+      cursor: pointer;
+      touch-action: manipulation;
+      z-index: 30;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #level-touch #level-zoom:active { background: rgba(74,109,167,0.9); }
+
+    /* mobile / coarse-pointer breakpoint — show touch UI, restack layout */
+    @media (pointer: coarse), (max-width: 900px) {
+      header .hint { display: none; }
+      main {
+        flex-direction: column;
+        justify-content: flex-start;
+        min-height: calc(100vh - 50px);
+      }
+      canvas {
+        width: 100vw;
+        max-width: 100vw;
+        height: auto;
+        border: none;
+      }
+      #game {
+        width: 100vw;
+        max-width: 100vw;
+        height: calc(100vh - 50px);
+        border: none;
+      }
+      #prompt { display: none !important; }
+      #info { font-size: 11px; padding: 6px 10px; max-width: 80%; }
+      .touch-only.active { display: flex; }
     }
   </style>
 </head>
@@ -93,6 +253,50 @@
     <div id="info"></div>
     <div id="prompt"></div>
     <div id="empty"></div>
+
+    <!-- Touch UI: sprite preview (mobile only) -->
+    <div id="sprite-touch" class="touch-only">
+      <div class="state-strip" id="sprite-state-strip"></div>
+      <div class="row">
+        <div class="dpad" id="sprite-dpad">
+          <button class="tbtn" data-dir="north-west">↖</button>
+          <button class="tbtn" data-dir="north">↑</button>
+          <button class="tbtn" data-dir="north-east">↗</button>
+          <button class="tbtn" data-dir="west">←</button>
+          <button class="tbtn" data-dir="east">→</button>
+          <button class="tbtn" data-dir="south-west">↙</button>
+          <button class="tbtn" data-dir="south">↓</button>
+          <button class="tbtn" data-dir="south-east">↘</button>
+        </div>
+        <div class="controls-side">
+          <div class="playback">
+            <button class="tbtn" id="t-prev" title="prev frame">◀</button>
+            <button class="tbtn" id="t-play" title="play/pause">▶</button>
+            <button class="tbtn" id="t-next" title="next frame">▶|</button>
+          </div>
+          <div class="zoom">
+            <button class="tbtn" id="t-zoom-out" title="zoom out">−</button>
+            <button class="tbtn" id="t-zoom-reset" title="zoom reset">⊙</button>
+            <button class="tbtn" id="t-zoom-in" title="zoom in">+</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Touch UI: level preview (mobile only, floating) -->
+    <div id="level-touch" class="touch-only">
+      <div class="dpad" id="level-dpad">
+        <button class="tbtn" data-dir="north-west">↖</button>
+        <button class="tbtn" data-dir="north">↑</button>
+        <button class="tbtn" data-dir="north-east">↗</button>
+        <button class="tbtn" data-dir="west">←</button>
+        <button class="tbtn" data-dir="east">→</button>
+        <button class="tbtn" data-dir="south-west">↙</button>
+        <button class="tbtn" data-dir="south">↓</button>
+        <button class="tbtn" data-dir="south-east">↘</button>
+      </div>
+      <button id="level-zoom" title="toggle zoom">🔍</button>
+    </div>
   </main>
   <script type="module">
     import { SpritePreviewMode } from './modes/sprite_preview.js';
@@ -103,6 +307,9 @@
       promptElement: document.getElementById('prompt'),
       infoElement: document.getElementById('info'),
       emptyStateElement: document.getElementById('empty'),
+      // touch UI containers
+      spriteTouch: document.getElementById('sprite-touch'),
+      levelTouch: document.getElementById('level-touch'),
     };
     const btnSprite = document.getElementById('btn-sprite');
     const btnLevel = document.getElementById('btn-level');
@@ -114,6 +321,9 @@
       els.emptyStateElement.style.display = 'none';
       els.infoElement.innerHTML = '';
       els.promptElement.innerHTML = '';
+      // reset touch container visibility (active class drives @media display)
+      els.spriteTouch.classList.remove('active');
+      els.levelTouch.classList.remove('active');
 
       if (modeName === 'sprite') {
         btnSprite.classList.add('active');
@@ -121,6 +331,7 @@
         els.canvas.style.display = '';
         els.gameElement.style.display = 'none';
         els.canvas.getContext('2d').clearRect(0, 0, els.canvas.width, els.canvas.height);
+        els.spriteTouch.classList.add('active');
         current = new SpritePreviewMode(els);
         await current.start();
       } else {
@@ -128,6 +339,7 @@
         btnSprite.classList.remove('active');
         els.canvas.style.display = 'none';
         els.gameElement.style.display = '';
+        els.levelTouch.classList.add('active');
         // Lazy-load Phaser preview runtime (临时拐杖, 见 preview/README.md)
         const { LevelPreviewMode } = await import('./preview/main.js');
         current = new LevelPreviewMode(els);

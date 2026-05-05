@@ -12,6 +12,8 @@
  *   - 玩家移动时播 walking 动画 (按 plan §13.1 fallback chain), 停止时播 idle 段
  *     (启发式按 state_key 名字找 walk/idle, 设计师 semantic 命名后命中)
  *   - 缺资源 → 友好空态, 不启动 Phaser
+ *   - **手机触屏支持**: DPad + zoom 浮在 Phaser 上方 (#level-touch DOM 容器),
+ *     pointerdown/up 写共享 touchState 对象, scene.update() 跟键盘并联读
  *
  * 不做:
  *   - 业务逻辑 / 状态机 / 任务 / 对话 / 背包 / NPC AI
@@ -19,6 +21,7 @@
  *     这些都在 sprite_preview 里逐个看, 留给 cute_pet 真接业务时再 wire)
  *   - 多关卡切换 UI (?map=xxx.tmj 是逃生口)
  *   - 音频 (Phaser audio 留给真用时再加)
+ *   - pinch-to-zoom / swipe 手势 (破坏整数像素纯度 + 跟原生浏览器手势冲突)
  */
 
 const PHASER_CDN = 'https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js';
@@ -83,12 +86,15 @@ async function checkMap(mapPath) {
 }
 
 export class LevelPreviewMode {
-  constructor({ gameElement, infoElement, promptElement, emptyStateElement }) {
+  constructor({ gameElement, infoElement, promptElement, emptyStateElement, levelTouch }) {
     this.gameElement = gameElement;
     this.infoElement = infoElement;
     this.promptElement = promptElement;
     this.emptyStateElement = emptyStateElement;
+    this.levelTouch = levelTouch ?? null;     // mobile-only DOM (DPad + zoom button)
     this.game = null;
+    this.touchState = null;                    // shared with Phaser scene; mutated by DOM
+    this._touchCleanup = [];
   }
 
   async start() {
@@ -124,6 +130,7 @@ export class LevelPreviewMode {
   }
 
   stop() {
+    this._unwireTouchUI();
     if (this.game) {
       this.game.destroy(true);
       this.game = null;
@@ -135,6 +142,14 @@ export class LevelPreviewMode {
   }
 
   _startGame(spriteMeta) {
+    // touchState 是 LevelPreviewMode 跟 Phaser scene 之间的共享状态对象。
+    // DOM 按钮 (mobile DPad / zoom) 写它, scene.update() 读它。
+    this.touchState = {
+      north: false, east: false, south: false, west: false,
+      'north-east': false, 'north-west': false, 'south-east': false, 'south-west': false,
+      zoomTrigger: false,
+    };
+
     const SceneClass = makePreviewScene({
       spriteMeta,
       mapPath: DEFAULT_MAP,
@@ -142,6 +157,7 @@ export class LevelPreviewMode {
       onInfoUpdate: (txt) => {
         if (this.infoElement) this.infoElement.innerHTML = txt;
       },
+      touchState: this.touchState,
     });
 
     this.game = new window.Phaser.Game({
@@ -151,7 +167,10 @@ export class LevelPreviewMode {
       roundPixels: true,
       backgroundColor: '#000',
       scale: {
-        mode: window.Phaser.Scale.NONE,
+        // FIT 让 Phaser canvas 在 #game 父容器里按比例缩放,
+        // 桌面 #game 是 640×640 固定, mobile 是 100vw × calc(100vh - 50px)
+        mode: window.Phaser.Scale.FIT,
+        autoCenter: window.Phaser.Scale.CENTER_BOTH,
         width: 640,
         height: 640,
       },
@@ -161,6 +180,64 @@ export class LevelPreviewMode {
       },
       scene: SceneClass,
     });
+
+    if (this.levelTouch) this._wireTouchUI(spriteMeta);
+  }
+
+  /* ────────────────────────────────────────────────────────────────────────
+   * Touch UI wiring (mobile only via @media; listeners 安全挂在桌面也无害)
+   * DPad 按钮按 sprite 真实方向数过滤 (4-dir sprite 隐藏 4 个对角线按钮)。
+   * pointerdown/up 写 touchState[dir] 布尔, scene.update() 跟键盘并联读。
+   * zoom 按钮单触发: 写 touchState.zoomTrigger = true, scene 消费后清。
+   * ──────────────────────────────────────────────────────────────────────── */
+
+  _wireTouchUI(spriteMeta) {
+    const availableDirs = new Set(Object.keys(spriteMeta.frames.rotations));
+    const dpad = this.levelTouch.querySelector('#level-dpad');
+    if (dpad) {
+      dpad.querySelectorAll('button[data-dir]').forEach((btn) => {
+        const dir = btn.dataset.dir;
+        if (availableDirs.has(dir)) {
+          btn.hidden = false;
+          const setOn = (e) => {
+            e.preventDefault();
+            this.touchState[dir] = true;
+            btn.classList.add('pressed');
+          };
+          const setOff = (e) => {
+            if (e?.preventDefault) e.preventDefault();
+            this.touchState[dir] = false;
+            btn.classList.remove('pressed');
+          };
+          btn.addEventListener('pointerdown', setOn);
+          btn.addEventListener('pointerup', setOff);
+          btn.addEventListener('pointercancel', setOff);
+          btn.addEventListener('pointerleave', setOff);
+          this._touchCleanup.push(() => {
+            btn.removeEventListener('pointerdown', setOn);
+            btn.removeEventListener('pointerup', setOff);
+            btn.removeEventListener('pointercancel', setOff);
+            btn.removeEventListener('pointerleave', setOff);
+          });
+        } else {
+          btn.hidden = true;
+        }
+      });
+    }
+    const zoomBtn = this.levelTouch.querySelector('#level-zoom');
+    if (zoomBtn) {
+      const onZoom = (e) => {
+        e.preventDefault();
+        this.touchState.zoomTrigger = true;
+      };
+      zoomBtn.addEventListener('pointerdown', onZoom);
+      this._touchCleanup.push(() => zoomBtn.removeEventListener('pointerdown', onZoom));
+    }
+  }
+
+  _unwireTouchUI() {
+    this._touchCleanup.forEach((fn) => fn());
+    this._touchCleanup = [];
   }
 
   _showPrompt(spriteMeta) {
@@ -175,6 +252,8 @@ export class LevelPreviewMode {
   }
 
   _showEmpty(what, why, expectedPath) {
+    // 空态时隐藏触屏 UI (game 没起来, DPad 也无意义)
+    if (this.levelTouch) this.levelTouch.classList.remove('active');
     this.emptyStateElement.innerHTML = `
       <h2>关卡预览启动失败</h2>
       <p><b>缺:</b> ${what}</p>
@@ -194,13 +273,15 @@ export class LevelPreviewMode {
  * Phaser Scene (factory, 因 Phaser 是 lazy load 不能在模块顶部 extends)
  * ──────────────────────────────────────────────────────────────────────────── */
 
-function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate }) {
+function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchState }) {
   // sprite 真实有几个方向, 玩家移动键就只生效那几个
   // (4-dir sprite: WASD; 8-dir sprite: WASD+QEZC)
   const availableDirs = new Set(Object.keys(spriteMeta.frames.rotations));
   const moveKeys = Object.fromEntries(
     Object.entries(MOVE_KEYS).filter(([, m]) => availableDirs.has(m.dir))
   );
+  // touchState 兜底: 桌面端 LevelPreviewMode 没传 (没 levelTouch) 时给个空对象
+  const touch = touchState ?? {};
 
   return class PreviewScene extends window.Phaser.Scene {
     constructor() {
@@ -380,12 +461,23 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate }) {
 
     update() {
       if (!this.player) return;
+
+      // Touch zoom 单触发 (DOM 按钮 pointerdown 写 true, scene 消费后清)
+      if (touch.zoomTrigger) {
+        this.zoomIndex = (this.zoomIndex + 1) % ZOOM_LEVELS.length;
+        this.cameras.main.setZoom(ZOOM_LEVELS[this.zoomIndex]);
+        this._updateInfo();
+        touch.zoomTrigger = false;
+      }
+
       let vx = 0;
       let vy = 0;
       let pressedDir = null;
       for (const [code, m] of Object.entries(moveKeys)) {
         const keyName = code.replace('Key', '');
-        if (this.keys[keyName]?.isDown) {
+        const keyDown = this.keys[keyName]?.isDown;
+        const touchDown = !!touch[m.dir];
+        if (keyDown || touchDown) {
           vx += m.vx;
           vy += m.vy;
           pressedDir = m.dir;

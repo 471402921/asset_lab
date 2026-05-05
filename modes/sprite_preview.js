@@ -6,6 +6,7 @@ import { SPRITE_KEYMAP, ANIMATION_DEFAULT_FPS } from '../keymap.js';
 const DEFAULT_SPRITE = 'assets/sprites/yellow_Shiba';
 
 const FRAME_INTERVAL_MS = 1000 / ANIMATION_DEFAULT_FPS;
+const MOBILE_DEFAULT_ZOOM = 6;   // 桌面默认 4×, mobile 像素小, 提到 6×
 
 // state_key 是设计师源头命名 (semantic, 例如 "idle"/"walking");
 // 旧 prompt-derived 长串 fallback 截 25 字 + "..."
@@ -14,12 +15,18 @@ function shortStateLabel(key) {
   return key.length > 25 ? `${key.slice(0, 25)}…` : key;
 }
 
+function isCoarsePointer() {
+  return window.matchMedia?.('(pointer: coarse)').matches
+    || window.matchMedia?.('(max-width: 900px)').matches;
+}
+
 export class SpritePreviewMode {
-  constructor({ canvas, promptElement, infoElement, emptyStateElement }) {
-    this.renderer = new Renderer(canvas);
-    this.input = new InputManager(promptElement);
-    this.infoElement = infoElement;
-    this.emptyStateElement = emptyStateElement;
+  constructor(els) {
+    this.renderer = new Renderer(els.canvas);
+    this.input = new InputManager(els.promptElement);
+    this.infoElement = els.infoElement;
+    this.emptyStateElement = els.emptyStateElement;
+    this.spriteTouch = els.spriteTouch ?? null;   // mobile-only DOM container
     this.sprite = null;
     this.facing = 'south';
 
@@ -30,6 +37,8 @@ export class SpritePreviewMode {
     this.playing = false;
     this._raf = null;
     this._lastTickTime = 0;
+
+    this._touchCleanup = [];     // listener removers
   }
 
   async start() {
@@ -45,6 +54,10 @@ export class SpritePreviewMode {
         )
       );
       this.input.setKeymap(keymap, (b) => this._dispatch(b));
+      // Mobile: default zoom larger (像素小手机看不清)
+      if (isCoarsePointer()) this.renderer.setZoom(MOBILE_DEFAULT_ZOOM);
+      // Touch UI (mobile only via media query, but DOM exists on all viewports)
+      if (this.spriteTouch) this._wireTouchUI();
       this._hideEmpty();
       this._showInfo();
       this._render();
@@ -57,9 +70,105 @@ export class SpritePreviewMode {
   stop() {
     this._stopRAF();
     this.input.stop();
+    this._unwireTouchUI();
     this._hideEmpty();
     if (this.infoElement) this.infoElement.innerHTML = '';
   }
+
+  /* ────────────────────────────────────────────────────────────────────────
+   * Touch UI wiring
+   * 桌面端 #sprite-touch 仍由 @media 隐藏, 但事件监听不影响。listener 在 stop()
+   * 移除以免切到 level mode 后泄漏。
+   * ──────────────────────────────────────────────────────────────────────── */
+
+  _wireTouchUI() {
+    // DPad: hide buttons whose direction the sprite doesn't have
+    const dpad = this.spriteTouch.querySelector('#sprite-dpad');
+    if (dpad) {
+      dpad.querySelectorAll('button[data-dir]').forEach((btn) => {
+        const dir = btn.dataset.dir;
+        if (this.sprite.rotations[dir]) {
+          btn.hidden = false;
+          this._on(btn, 'pointerdown', (e) => {
+            e.preventDefault();
+            this._dispatch({ action: 'face', value: dir });
+          });
+        } else {
+          btn.hidden = true;
+        }
+      });
+    }
+    // Playback row
+    this._bindButton('#t-prev', { action: 'animation', value: 'prev' });
+    this._bindButton('#t-play', { action: 'animation', value: 'toggle_play' });
+    this._bindButton('#t-next', { action: 'animation', value: 'next' });
+    // Zoom row
+    this._bindButton('#t-zoom-out', { action: 'zoom', value: '-1' });
+    this._bindButton('#t-zoom-reset', { action: 'zoom', value: 'reset' });
+    this._bindButton('#t-zoom-in', { action: 'zoom', value: '+1' });
+    // State strip
+    this._renderStateStrip();
+  }
+
+  _bindButton(selector, dispatch) {
+    const btn = this.spriteTouch.querySelector(selector);
+    if (!btn) return;
+    this._on(btn, 'pointerdown', (e) => {
+      e.preventDefault();
+      this._dispatch(dispatch);
+    });
+  }
+
+  _on(el, type, handler) {
+    el.addEventListener(type, handler);
+    this._touchCleanup.push(() => el.removeEventListener(type, handler));
+  }
+
+  _renderStateStrip() {
+    const strip = this.spriteTouch.querySelector('#sprite-state-strip');
+    if (!strip) return;
+    // Static button + one per state
+    const buttons = [
+      `<button data-state="clear">Static</button>`,
+      ...this.stateKeys.map(
+        (k, i) => `<button data-state="index:${i}" data-state-key="${k}">${k}</button>`
+      ),
+    ];
+    strip.innerHTML = buttons.join('');
+    strip.querySelectorAll('button').forEach((btn) => {
+      this._on(btn, 'pointerdown', (e) => {
+        e.preventDefault();
+        this._dispatch({ action: 'state', value: btn.dataset.state });
+      });
+    });
+    this._highlightActiveState();
+  }
+
+  _highlightActiveState() {
+    const strip = this.spriteTouch?.querySelector('#sprite-state-strip');
+    if (!strip) return;
+    strip.querySelectorAll('button').forEach((btn) => {
+      const isActive =
+        (btn.dataset.state === 'clear' && this.stateKey === null) ||
+        (btn.dataset.stateKey && btn.dataset.stateKey === this.stateKey);
+      btn.classList.toggle('active', isActive);
+    });
+    // Play button glyph reflects state
+    const playBtn = this.spriteTouch?.querySelector('#t-play');
+    if (playBtn) playBtn.textContent = this.playing ? '⏸' : '▶';
+  }
+
+  _unwireTouchUI() {
+    this._touchCleanup.forEach((fn) => fn());
+    this._touchCleanup = [];
+    // Clear state strip so the next mode-switch / next sprite re-renders fresh
+    const strip = this.spriteTouch?.querySelector('#sprite-state-strip');
+    if (strip) strip.innerHTML = '';
+  }
+
+  /* ────────────────────────────────────────────────────────────────────────
+   * Action dispatch (shared between keyboard + touch)
+   * ──────────────────────────────────────────────────────────────────────── */
 
   _dispatch({ action, value }) {
     if (!this.sprite) return;
@@ -99,6 +208,7 @@ export class SpritePreviewMode {
     }
     this._render();
     this._showInfo();
+    this._highlightActiveState();
   }
 
   _handleAnimation(value) {
@@ -108,6 +218,7 @@ export class SpritePreviewMode {
       if (this.playing) this._startRAF();
       else this._stopRAF();
       this._showInfo();
+      this._highlightActiveState();
     } else if (value === 'next' || value === 'prev') {
       if (!this.stateKey) return;
       // 单步默认暂停, 让设计师看清每一帧
@@ -117,6 +228,7 @@ export class SpritePreviewMode {
       }
       this._stepFrame(value === 'next' ? +1 : -1);
       this._showInfo();
+      this._highlightActiveState();
     }
   }
 
@@ -197,6 +309,8 @@ export class SpritePreviewMode {
   }
 
   _showEmpty(msg) {
+    // 空态时隐藏触屏 UI (没 sprite, state strip / DPad 都无意义)
+    if (this.spriteTouch) this.spriteTouch.classList.remove('active');
     this.emptyStateElement.innerHTML = `
       <h2>没有 sprite 可预览</h2>
       <p><b>原因:</b> ${msg}</p>
