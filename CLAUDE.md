@@ -4,105 +4,92 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository status
 
-MVP skeleton committed. Two preview modes (sprite + level) wired up but **no seed assets yet** — both modes show friendly empty-state overlays until the designer drops pixellab exports into `assets/`.
+Working MVP. Two functional pieces:
 
-[asset-lab-plan.md](asset-lab-plan.md) is the design doc and source of truth for scope/architecture/decisions. It originated from multi-round discussion. **Read it before doing anything non-trivial.** The execution checklist lives in §10.
+1. **Browser sprite preview** (vanilla JS) — sprite_preview mode reads pixellab character `metadata.json` + 8 directional PNGs, supports keyboard interaction. Empty-state until designer drops in a real sprite.
+2. **pixellab → Tiled converter** (Python, in [tools/](tools/)) — turns pixellab Map Editor exports and pixellab character exports into Tiled `.tmx` / `.tsx` files that `flame_tiled` can directly consume.
 
-## What this tool is
+[asset-lab-plan.md](asset-lab-plan.md) is the design doc + decision log; **read it before any non-trivial work**. Major scope shift on 2026-05-05: dropped the in-browser level preview (Tiled does this better). See plan's 修订记录 section.
 
-asset-lab is a debugging/preview tool for pixel-art game assets produced by [pixellab.ai](https://www.pixellab.ai/), consumed downstream by the cute_pet game (Flutter+Flame, separate repo at https://github.com/471402921/cute_pixel). It fills three gaps pixellab does not: keyboard-driven sprite interaction preview, multi-asset level composition, and project-level resource management via git.
+## What this tool is (and is NOT)
 
-Two main modes: **sprite preview** (single sprite, keyboard-controlled directions/animations) and **level preview** (declarative JSON composing map + sprites + items + ui via a unified `entities[]` array).
+asset-lab is the **bridge layer** between pixellab.ai (resource generation) and cute_pet (the game, Flutter+Flame+GetX).
 
-## Terminology (canonical — do not regress)
-
-After a 2026-05-04 alignment, the following terms are canonical. Don't reintroduce "scene" anywhere in code/docs/JSON unless quoting historical context.
-
-| Concept | Canonical term | Path / symbol |
-|---|---|---|
-| 关卡组合 (multi-asset composition) | **level** | `levels/*.json`, `LevelPreviewMode`, `loadLevel`, `LEVEL_KEYMAP` |
-| 全图地图 (full-image background) | **map** | `assets/maps/*.png`, `loadMap`, `{"type":"map"}` entity |
-| 瓦片地图 (tile-based map) | **tilemap** | `assets/tilemaps/`, `loadTilemap` (stub) |
-| 角色 sprite | **sprite** | `assets/sprites/{name}/`, `loadSprite` |
-
-**Banned: "scene"** as a code/JSON identifier. Map is just one entity type within a level — there is no special "background" field on a level (the JSON has `entities[]` only). z-order = array order; map naturally goes first.
+- ✅ Sprite 8-direction preview that pixellab's web UI doesn't do
+- ✅ pixellab → Tiled conversion (Map Editor exports + character exports)
+- ✅ Asset organization via git (`assets/`)
+- ❌ **Not a level editor** — Tiled is. Designer installs Tiled.
+- ❌ **Not a game engine** — cute_pet uses Flame.
+- ❌ **Not a Flutter/Dart project** — we hand cute_pet a spec, they implement it.
 
 ## Hard constraints (do not violate without explicit user sign-off)
 
-These come from plan §9 and §11. They are load-bearing decisions, not preferences.
+These are load-bearing decisions, not preferences. From plan §9.
 
-- **Zero build, zero deps.** No npm packages, no React/Vue/Phaser/p5, no webpack/vite. Pure HTML + Vanilla JS + Canvas 2D. The whole point is that designers + Claude Code can vibe-code on raw JS.
-- **pixellab `metadata.json` is upstream contract.** Never change field semantics. asset-lab and cute_pet both read the same shape. Reference sample in plan §13. Check `export_version === "2.0"` on load and hard-error otherwise — do not silently accept unknown versions.
-- **Direction strings stay raw.** Use pixellab's literal strings (`south`, `south-east`, `east`, ...) in code and keymaps. Do **not** translate to `N/E/S/W`.
-- **Pixel purity is a P0 invariant.** Every Canvas render path must set `ctx.imageSmoothingEnabled = false` AND the canvas element must have `image-rendering: pixelated` (+ Firefox/spec fallbacks). Zoom is **integer-only** (2×/3×/4×/6×/8×, default 4×). Non-integer zoom breaks pixel art — reject it.
-- **MVP is read-only.** Do not add edit UIs preemptively. Editing capabilities grow ~30–80 LOC at a time, only when the designer asks for a specific pain point.
-- **Don't engine-ify.** No physics, no collision, no animation state machines, no level-to-level triggers. That belongs in cute_pet, not here.
-- **Loaders are a plugin slot.** `loaders/{type}_loader.js` per asset type. Adding a new asset type must not touch `core/`.
-- **Secrets stay out of git.** `.mcp.json` holds the pixellab API token — it must be `.gitignore`d, with `.mcp.json.example` as the template (plan §12.2).
+### Browser side (sprite preview)
+- **Zero build, zero deps.** No npm, no React/Vue/Phaser/p5, no webpack/vite. Pure HTML + Vanilla JS + Canvas 2D. Designer + Claude Code vibe-codes on raw JS.
+- **pixellab `metadata.json` is upstream contract.** Never change field semantics. Hard-error on `export_version !== "2.0"`.
+- **Direction strings stay raw.** Use pixellab's literal `south`, `south-east`, `east`, ... in code. Do NOT translate to `N/E/S/W`.
+- **Pixel purity is P0.** `ctx.imageSmoothingEnabled = false` AND CSS `image-rendering: pixelated`. Zoom is integer-only (2/3/4/6/8, default 4). Reject non-integer zoom.
+
+### Converter side (Python in tools/)
+- **Layered architecture is load-bearing.** `tools/converters/` has three sections: `pixellab/` (parsers), `ir.py` (tool-agnostic intermediate representation), `tiled/` (writers). **Parsers must not import from writers, and vice versa.** Future migration (pixellab → some other tool, or Tiled → Phaser format) only swaps one side. Verify with `grep -rn pixellab tools/converters/tiled/` (must be empty modulo docstrings).
+- **Stdlib only.** No pip dependencies. Same "zero deps" spirit as browser side.
+- **CLI must be safe to re-run** (idempotent, overwrites cleanly).
+- **`temporary_asset/` is a workflow buffer, never source of truth.** Contents are in `.gitignore`. Designer drops pixellab exports here, runs converter, output goes into `assets/`. The original pixellab exports live in pixellab.ai itself, not in this repo.
+
+### Cross-cutting
+- **Don't replace Tiled.** No in-browser level editor. No level JSON schema. If feature seems to need it, push back to "let designer use Tiled."
+- **Don't write Flutter/Dart code in this repo.** cute_pet is its own project. We write specs in [docs/cute_pet_integration.md](docs/cute_pet_integration.md), they implement.
 
 ## Architecture
 
-- `core/` — renderer (pixel-purity + integer zoom), input (keymap-reflected prompt panel), level_loader, version_guard. Asset-type-agnostic.
-- `loaders/` — one file per asset type (sprite, item, ui, map, effect, audio, tilemap-stub). Sprite loader reads pixellab `metadata.json`; others mostly load single PNGs or frame sequences. `loaders/_image.js` is a tiny shared `loadImage(src)` helper.
-- `modes/` — `sprite_preview.js` and `level_preview.js`. The two main entry flows.
-- `assets/` — designer's drop zone, mirrors cute_pet's `assets/` structure so resources can be copied across without restructuring.
-- `levels/` — declarative `level_xxx.json` (entity-unified schema, see below). asset-lab is the schema's source of truth; cute_pet will eventually consume the same files.
-- `keymap.js` — single source for keybindings; the on-screen prompt panel is generated from this so designers always see current bindings.
+### Browser side
+- `core/` — `renderer.js` (pixel-purity + integer zoom), `input.js` (keymap-driven prompt panel), `version_guard.js` (export_version check).
+- `loaders/` — `sprite_loader.js` (the only one left after Tiled adoption); `_image.js` (small shared `loadImage(src)` helper).
+- `modes/sprite_preview.js` — single mode now (level preview was dropped).
+- `keymap.js` — only `SPRITE_KEYMAP` left.
+- `index.html` — minimal entry, no mode toggle.
 
-### Level JSON schema
+### Converter side ([tools/](tools/))
+- `pixellab_to_tiled.py` — CLI orchestrator. Handles file copies, output paths, calls parsers + writers.
+- `converters/ir.py` — `TileMap`, `ImageLayer`, `ObjectLayer`, `MapObject`, `Sprite`, `SpriteFrame` dataclasses. **Tool-agnostic.**
+- `converters/pixellab/parse_map.py` — pixellab Map Editor export → `IR.TileMap` (image layer + walls/furniture object layers) + auxiliary terrain grid for sidecar JSON.
+- `converters/pixellab/parse_sprite.py` — pixellab character export → `IR.Sprite` (8 frames with `direction` property each).
+- `converters/tiled/write_tmx.py` — IR → Tiled `.tmx` XML.
+- `converters/tiled/write_tsx.py` — IR → Tiled `.tsx` XML (image collection style).
 
-```json
-{
-  "entities": [
-    { "type": "map",    "asset": "maps/forest_clearing.png" },
-    { "type": "sprite", "asset": "sprites/husky_chibi", "x": 120, "y": 200, "facing": "south" },
-    { "type": "item",   "asset": "items/bone.png", "x": 180, "y": 220 },
-    { "type": "ui",     "asset": "ui/dialogue_frame.png", "x": 0, "y": 400 }
-  ]
-}
-```
-
-- All entries live under one `entities[]`. No special-cased background field.
-- Array order = z-order (later wins, so put map first).
-- `x/y` only meaningful for non-`map` types (map fills the whole canvas).
-- `facing` only meaningful for `sprite` (defaults to `south`).
-- Asset paths are relative to `assets/`.
-
-### Entity ownership (asset-lab vs cute_pet)
-
-Not all level entity types are owned by asset-lab. Important boundary:
-
-| Type | source of truth | meaning of x/y in level JSON |
-|---|---|---|
-| `map`, `sprite` | **asset-lab** (level JSON) | real layout, cute_pet reads this |
-| `item`, `ui`, `effect`, `audio` | **cute_pet runtime** (Flutter+GetX business logic) | design-intent reference only — cute_pet ignores it and decides real position from game state |
-
-So when a designer writes `{"type":"item", "x":180, "y":220}` in a level, they're showing the cute_pet engineer "roughly this size, roughly this spot" — **not** dictating runtime placement. asset-lab still renders these entities at the JSON-specified position so the designer can visualize the intent. Plan §8.1 has the full table.
-
-Practical implication: do not over-invest in level features around items/ui/effects/audio (selectors, layering, snap-to-grid, etc.) — they're reference renders, not engine specs.
-
-File writes (for editing level JSON, future game_meta editor) will use the File System Access API on Chromium with a download-button fallback for Safari/Firefox. **Not implemented yet** (`core/file_writer.js` deliberately doesn't exist — MVP is read-only).
+See [tools/converters/README.md](tools/converters/README.md) for the decoupling rules and how to add a new source/target.
 
 ## Running
 
-**Cannot be opened by double-clicking `index.html`** — `file://` protocol blocks `fetch('metadata.json')` via CORS. Designers will see a blank screen and assume it's broken. Always serve over HTTP. Three options (plan §4.4):
-
+### Browser (sprite preview)
+**Cannot double-click `index.html`** — `file://` blocks fetch. Always serve over HTTP:
 ```bash
-# A — Python (macOS built-in)
-python3 -m http.server 8000
-
-# B — Node
-npx serve
-
-# C — VS Code "Live Server" extension (recommended for designers)
+python3 -m http.server 8000      # or `npx serve`, or VS Code Live Server
 ```
 
-There is no test suite, no lint, no CI, and none is planned. This is a debugging tool, not a product (plan §11).
+### Converter
+```bash
+python3 tools/pixellab_to_tiled.py --map-input "temporary_asset/{export}/" --name {map_name}
+python3 tools/pixellab_to_tiled.py --sprites
+```
+
+There is no test suite, no lint, no CI. This is a debugging/conversion tool, not a product.
 
 ## Working with the designer
 
-The primary user is one designer using Claude Code in VS Code. Typical request flow: "move the husky 50px left" → edit `levels/*.json` → browser refresh. "Add an animation speed slider" → ~50 LOC → refresh. Prefer the smallest change that solves the stated pain. Ask before adding level-JSON fields — schema drift is the main risk.
+Primary user is one designer using Claude Code in VS Code + Tiled (GUI level editor) + pixellab (asset generation).
+
+- **Sprite preview tweaks**: if designer wants "show animation FPS" or "switch sprite via Tab", that's vibe-code-able in `modes/sprite_preview.js` (~30-80 LOC at a time, per plan §9).
+- **Converter changes**: if a new pixellab field appears or a new Tiled convention is needed, that's a converter change. Stay in the parser/writer split; don't blob logic into the CLI orchestrator.
+- **Don't touch `temporary_asset/`** when restructuring directories — that's the designer's drop zone.
+- **If the request is "preview a level in the browser,"** redirect to "open .tmx in Tiled" instead. Don't reintroduce level_preview.
 
 ## pixellab MCP
 
-Plan §12. Already registered at user scope via `claude mcp add pixellab https://api.pixellab.ai/mcp -t http -H "Authorization: Bearer ..."` — token lives in `~/.claude.json`, not in this repo. The `.mcp.json.example` template is provided for anyone preferring repo-scope config. pixellab MCP only exposes **generation** tools (`create_character`, `animate_character`, `create_tileset`, etc.) — it cannot list previously generated assets. Asset inventory lives in this git repo, not in pixellab.
+Already registered at user scope (`claude mcp add pixellab ...` writes to `~/.claude.json`). Token is not in this repo. `.mcp.json.example` provided for repo-scope users; `.mcp.json` itself is `.gitignore`d. pixellab MCP only exposes generation tools; asset inventory is git, not pixellab.
+
+## Cute_pet integration
+
+[docs/cute_pet_integration.md](docs/cute_pet_integration.md) is the **contract** for the downstream Flutter project. asset-lab schema/path/Tiled-convention changes go there first. cute_pet engineers read it as their source of truth. Don't put cute_pet-specific Dart code in this repo.

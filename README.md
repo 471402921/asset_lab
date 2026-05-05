@@ -1,45 +1,81 @@
 # asset-lab
 
-像素游戏资源调试 / 预览工具。配合 [pixellab.ai](https://www.pixellab.ai/) 生成,下游服务于 cute_pet 游戏。
+像素游戏资源中间层。**两件事**:
 
-详细背景与决策见 [asset-lab-plan.md](asset-lab-plan.md)。
+1. **sprite 八方向键盘交互预览**(浏览器跑,纯 vanilla JS)
+2. **pixellab 资源 → Tiled 格式转换**(Python 脚本,在 `tools/`)
+
+关卡编辑由 [Tiled](https://www.mapeditor.org/) 负责;cute_pet 用 `flame_tiled` 直接消费。asset-lab 是中间桥,**不重造 Tiled 轮子,也不替 cute_pet 写 Dart**。
+
+详细决策见 [asset-lab-plan.md](asset-lab-plan.md)。给 cute_pet 工程师的契约见 [docs/cute_pet_integration.md](docs/cute_pet_integration.md)。
 
 ---
 
-## 启动
-
-**不能直接双击 `index.html`** — 浏览器对 `file://` 协议下的 `fetch('metadata.json')` 会按 CORS 拒绝。必须本地起 HTTP server,三选一:
+## 一次性安装
 
 ```bash
-# A. Python (macOS 自带, 最快)
-cd asset_lab && python3 -m http.server 8000
-# 浏览器访问 http://localhost:8000
+# 1. clone 本仓
+git clone https://github.com/471402921/asset_lab.git
+cd asset_lab
 
-# B. Node
-cd asset_lab && npx serve
+# 2. 装 Tiled (关卡编辑器, 免费)
+brew install --cask tiled       # macOS
+# 或 https://www.mapeditor.org/download.html
 
-# C. VS Code "Live Server" 扩展 (推荐设计师用这个)
-#    右键 index.html → Open with Live Server
+# 3. (设计师) VS Code 装 "Live Server" 扩展, 用来跑 sprite preview
+# 4. (开发者) 配 pixellab MCP — 见下面
+
+# 5. (一次性) 验证 pixellab → Tiled converter 跑得通
+python3 tools/pixellab_to_tiled.py --help
 ```
-
-推荐 **Chrome / Edge 122+**。Safari / Firefox 也能跑预览,但未来文件写入功能会降级到下载按钮。
 
 ---
 
 ## 工作流
 
+### 改地图(用 pixellab Map Editor + Tiled + converter)
+
 ```
-1. clone 仓库, 装 VS Code "Live Server" 扩展 (一次)
-2. 在 pixellab 生成资源 (Web 或 Claude Code + MCP, 见下)
-3. 把 pixellab 导出目录拷进 assets/{type}/{name}/
-4. 右键 index.html → Open with Live Server
-5. 顶部切 sprite preview / level preview
-6. 键盘交互看效果 (8 方向 / 缩放)
-7. 想改关卡: 跟 Claude Code 说 "把 husky 往左挪 50" → 改 levels/*.json → 浏览器自动刷新
-8. 满意 → git commit && git push
+1. pixellab Map Editor 里画地图
+2. 导出整个目录 → 拖进 temporary_asset/
+3. python3 tools/pixellab_to_tiled.py \
+     --map-input "temporary_asset/{export_dir}/" \
+     --name      room_dark_floors_v1
+4. (可选) Tiled 打开 assets/maps/room_dark_floors_v1.tmx 调家具 / 改 collision
+5. git commit + push
+6. cute_pet 工程师 git pull → flame_tiled 自动加载新关卡
 ```
 
-### Sprite preview 键盘
+### 看 sprite 八方向(用 sprite preview)
+
+```
+1. pixellab 生成 character → 导出
+2. 拷进 assets/sprites/{name}/ (含 metadata.json + rotations/)
+3. (可选) python3 tools/pixellab_to_tiled.py --sprites
+   生成 {name}.tsx 让 Tiled 也能放 NPC
+4. 浏览器跑 asset-lab (右键 index.html → Open with Live Server)
+5. WASDQEZC 切 8 方向, +/- 整数倍缩放, 0 重置
+6. git commit + push
+```
+
+### 跑 sprite preview 浏览器界面
+
+**不能直接双击 `index.html`** — `file://` 协议下 fetch 会被 CORS 拒。三选一:
+
+```bash
+# A. Python (macOS 自带)
+python3 -m http.server 8000
+# 浏览器开 http://localhost:8000
+
+# B. Node
+npx serve
+
+# C. VS Code "Live Server" 扩展 (推荐, 改 metadata.json 自动刷新)
+```
+
+推荐 Chrome / Edge 122+。
+
+#### Sprite preview 键盘
 
 | 键 | 作用 |
 |---|---|
@@ -47,33 +83,48 @@ cd asset_lab && npx serve
 | Q / E / Z / C | NW / NE / SW / SE |
 | `+` / `-` | 整数倍缩放 (2 / 3 / 4 / 6 / 8) |
 | `0` | 缩放重置回 4× |
-| Space / `[` / `]` | 动画控制 (MVP 静帧, 待动画样本到位后实装) |
-
-### Level preview
-
-加载 `levels/level_001.json`,按 entities 顺序 (z-order) 渲染 map / sprite / item / ui。地图也是 entity (`{"type":"map"}`),没有特例化的 background 字段。改 JSON → 刷新即生效。Schema 见 [asset-lab-plan.md](asset-lab-plan.md) §6.2。
+| Space / `[` / `]` | 动画控制 (待 pixellab 动画样本到位再实装) |
 
 ---
 
-## 资源投放
-
-按 `assets/{type}/{name}/` 组织,与 cute_pet 同构:
+## 目录结构
 
 ```
-assets/
-├── sprites/{name}/        # pixellab metadata.json + rotations/*.png
-├── items/{name}.png
-├── ui/{name}.png
-├── maps/{name}.png        # 全图地图 (pixellab create_map 生成)
-├── effects/{name}/        # 帧序列
-├── audio/{music,sfx}/
-└── tilemaps/              # 瓦片地图, loader 暂未实装
+assets/                              # 仓内"可消费资源"
+├── maps/                            # Tiled .tmx 关卡
+├── tilesets/                        # Tiled .tsx + 引用的 PNG
+│   ├── {map_name}/                  # 从 pixellab Map Editor 转换出
+│   │   ├── composite.png
+│   │   ├── terrain-info.json        # cute_pet 可选: 查每格地形
+│   │   └── tiles/*.png              # 原 wang tilesets
+│   ├── furniture/                   # 家具 image collection (设计师在 Tiled 配 collision)
+│   ├── items/
+│   └── ui/
+├── sprites/                         # 角色, asset-lab + Tiled 共用
+│   └── {name}/
+│       ├── metadata.json            # asset-lab sprite preview 读
+│       ├── rotations/*.png          # pixellab 原 8 方向
+│       └── {name}.tsx               # converter 生成 (Tiled 用)
+└── audio/{music,sfx}/
 
-levels/
-└── level_001.json         # 关卡组合 JSON
+temporary_asset/                     # ★ 仓根 workflow buffer
+                                     # pixellab 原始导出在此暂存
+                                     # 内容 .gitignore (不进 git)
+
+tools/                               # 转换 pipeline
+├── pixellab_to_tiled.py             # CLI 入口
+└── converters/                      # 分层架构 (parsers / IR / writers)
+    ├── ir.py                        # 工具无关中间表示
+    ├── pixellab/                    # 输入解析器 (pixellab → IR)
+    └── tiled/                       # 输出生成器 (IR → Tiled)
+
+docs/cute_pet_integration.md         # ★ 给 cute_pet 工程师的契约文档
+
+modes/sprite_preview.js              # 浏览器 sprite 预览
+core/, loaders/, keymap.js, index.html
 ```
 
-Sprite 的 metadata.json 必须是 pixellab 导出格式,`export_version === "2.0"`。其它版本会硬报错而非静默兼容。
+详细决策与历史见 [asset-lab-plan.md](asset-lab-plan.md)。
 
 ---
 
@@ -89,17 +140,16 @@ Token 在 [pixellab.ai](https://www.pixellab.ai/) 用户中心拿。订阅建议
 
 文档: <https://api.pixellab.ai/mcp/docs>
 
-如需 repo-scope 配置 (`.mcp.json`),参考 `.mcp.json.example`。注意 `.mcp.json` 已在 `.gitignore`,不会被提交。
+如需 repo-scope 配置 (`.mcp.json`),参考 `.mcp.json.example`(`.mcp.json` 已在 `.gitignore`)。
 
 ---
 
 ## 不做的事
 
-按 [asset-lab-plan.md](asset-lab-plan.md) §11:
-
-- 任何 npm 包 / framework / build step
-- 任何编辑 UI (MVP 只读, 编辑能力按真实痛点 vibe-code 长)
+- 重造 Tiled (关卡编辑全部交给 Tiled)
+- 替 cute_pet 写 Flutter / Dart 代码 (asset-lab 只出 spec)
+- 任何 npm 包 / framework / 浏览器侧 build step
 - 物理 / 碰撞 / 状态机 / 触发器 (那是 cute_pet 的事)
 - 复刻 pixellab 的生成能力
 - 非整数倍缩放 (破坏像素纯度)
-- 自己设计 sprite/items 的 schema (pixellab 是 source of truth)
+- 自己设计 sprite/items 的 schema (pixellab + Tiled 是 source of truth)
