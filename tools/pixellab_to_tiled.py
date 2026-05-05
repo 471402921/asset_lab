@@ -2,47 +2,33 @@
 """pixellab → Tiled converter CLI.
 
 Pipeline (decoupled architecture):
-    pixellab export -> parser/* -> IR -> writer/tiled/* -> .tmx + .tsx
+    pixellab character export -> parser -> IR -> writer -> .tsx
+
+Current scope: only character sprites. Map / tilemap conversion was
+removed on 2026-05-05 — the designer edits maps in Tiled directly,
+so asset-lab no longer transforms map data.
 
 Usage:
-    # Convert one pixellab Map Editor export
-    python3 tools/pixellab_to_tiled.py \\
-        --map-input  temporary_asset/Untitled\\ Map-export-2/ \\
-        --name       pixellab_demo_001 \\
-        --walls      1
-
-    # Also (or only) convert all pixellab character sprites in assets/sprites/
+    # Generate Tiled .tsx for every pixellab sprite in assets/sprites/.
+    # Re-runnable; overwrites existing {name}.tsx files.
     python3 tools/pixellab_to_tiled.py --sprites
 
-    # Both at once
-    python3 tools/pixellab_to_tiled.py \\
-        --map-input  temporary_asset/Untitled\\ Map-export-2/ \\
-        --name       pixellab_demo_001 \\
-        --sprites
-
 Outputs (relative to repo root):
-    Map mode:
-        assets/maps/{name}.tmx
-        assets/tilesets/{name}/composite.png
-        assets/tilesets/{name}/tiles/{short}.png         (renamed wang PNGs)
-        assets/tilesets/{name}/terrain-info.json
-    Sprite mode:
-        assets/sprites/{sprite_name}/{sprite_name}.tsx   (per sprite)
+    assets/sprites/{sprite_name}/{sprite_name}.tsx   (per sprite)
+
+If a sprite directory is missing metadata.json or has a wrong
+export_version, it's skipped with a warning (other sprites still convert).
 """
 from __future__ import annotations
 
 import argparse
-import json
-import shutil
 import sys
 from pathlib import Path
 
 # Make tools/ importable when run as a script.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from converters.pixellab.parse_map import parse_map
 from converters.pixellab.parse_sprite import parse_sprite
-from converters.tiled.write_tmx import write_tmx
 from converters.tiled.write_tsx import write_sprite_tsx
 
 
@@ -52,102 +38,24 @@ ASSETS_DIR = REPO_ROOT / "assets"
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="pixellab -> Tiled (.tmx/.tsx) converter",
+        description="pixellab → Tiled (.tsx) converter (sprite-only).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     parser.add_argument(
-        "--map-input",
-        type=Path,
-        help="pixellab Map Editor export directory (containing map.json)",
-    )
-    parser.add_argument(
-        "--name",
-        help="Output name for the map (becomes assets/maps/{name}.tmx). "
-        "Required if --map-input given.",
-    )
-    parser.add_argument(
-        "--walls",
-        type=int,
-        default=1,
-        help="Which terrainId becomes the walls collision layer (default: 1)",
-    )
-    parser.add_argument(
         "--sprites",
         action="store_true",
-        help="Also generate .tsx for each pixellab sprite in assets/sprites/",
+        help="Generate .tsx for every pixellab sprite in assets/sprites/",
     )
     args = parser.parse_args()
 
-    did_anything = False
-
-    if args.map_input:
-        if not args.name:
-            parser.error("--name is required when --map-input is given")
-        convert_map(args.map_input.resolve(), args.name, args.walls)
-        did_anything = True
-
-    if args.sprites:
-        convert_all_sprites()
-        did_anything = True
-
-    if not did_anything:
+    if not args.sprites:
         parser.print_help()
         return 1
 
+    convert_all_sprites()
     print("\n[OK] converter done")
     return 0
-
-
-def convert_map(input_dir: Path, name: str, walls_terrain_id: int) -> None:
-    print(f"[map] parsing {input_dir} (walls=terrainId {walls_terrain_id})")
-    parsed = parse_map(input_dir, walls_terrain_id=walls_terrain_id)
-
-    tileset_out_dir = ASSETS_DIR / "tilesets" / name
-    tiles_out_dir = tileset_out_dir / "tiles"
-    map_out_path = ASSETS_DIR / "maps" / f"{name}.tmx"
-    terrain_info_path = tileset_out_dir / "terrain-info.json"
-
-    tileset_out_dir.mkdir(parents=True, exist_ok=True)
-    tiles_out_dir.mkdir(parents=True, exist_ok=True)
-    map_out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Copy composite.
-    composite_dst = tileset_out_dir / "composite.png"
-    shutil.copy2(parsed.composite_source, composite_dst)
-    print(f"[map]   wrote {composite_dst.relative_to(REPO_ROOT)}")
-
-    # Copy + rename wang tilesets.
-    for short_name, src in parsed.wang_tile_sources.items():
-        dst = tiles_out_dir / f"{short_name}.png"
-        shutil.copy2(src, dst)
-        print(f"[map]   wrote {dst.relative_to(REPO_ROOT)}")
-
-    # Set image_path on the IR ImageLayer relative to the .tmx output path.
-    # .tmx is at assets/maps/{name}.tmx
-    # composite is at assets/tilesets/{name}/composite.png
-    # so relative path is ../tilesets/{name}/composite.png
-    for layer in parsed.tilemap.layers:
-        # ImageLayer is the only layer type with image_path; check by attribute
-        # to avoid importing ir here just for isinstance.
-        if hasattr(layer, "image_path") and layer.image_path == "":
-            layer.image_path = f"../tilesets/{name}/composite.png"
-
-    # Write .tmx.
-    write_tmx(parsed.tilemap, map_out_path)
-    print(f"[map]   wrote {map_out_path.relative_to(REPO_ROOT)}")
-
-    # Write terrain-info.json (flat grid + terrain dict).
-    terrain_info = {
-        "tileSize": parsed.tilemap.tile_width,
-        "width": parsed.tilemap.width,
-        "height": parsed.tilemap.height,
-        "terrains": {str(tid): name for tid, name in parsed.terrain_id_to_name.items()},
-        "wallsTerrainId": walls_terrain_id,
-        "grid": parsed.terrain_grid,
-    }
-    terrain_info_path.write_text(json.dumps(terrain_info, indent=2, ensure_ascii=False))
-    print(f"[map]   wrote {terrain_info_path.relative_to(REPO_ROOT)}")
 
 
 def convert_all_sprites() -> None:

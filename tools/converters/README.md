@@ -2,6 +2,18 @@
 
 分层的 pipeline 架构。**写新 source / target 之前先读本文**。
 
+## 当前现状
+
+只剩 sprite pipeline 一条:
+
+```
+pixellab character export  →  pixellab/parse_sprite.py  →  IR.Sprite  →  tiled/write_tsx.py  →  .tsx
+```
+
+之前还有的 pixellab Map Editor → .tmx pipeline 已删除(2026-05-05,设计师改用 Tiled 直接编辑地图)。删除时一并删了 `parse_map.py` / `write_tmx.py` / IR 的 `TileMap` / `ImageLayer` / `ObjectLayer` / `MapObject`。
+
+虽然现在只有一条 pipeline,**分层架构不能因此塌方**。它的存在是为了"未来加新 source / target 时不用重构",今天少一条,明天可能多两条(pixellab v2 / 别的工具 / Phaser format 等)。
+
 ## 三段架构
 
 ```
@@ -10,9 +22,9 @@
 
 | 角色 | 职责 | 当前实现 |
 |---|---|---|
-| **parser** | 读特定 source 的原始格式,产出 IR dataclass | `pixellab/parse_map.py` (Map Editor 导出 → `IR.TileMap`)<br>`pixellab/parse_sprite.py` (角色导出 → `IR.Sprite`) |
-| **IR** | tool-agnostic 中间表示 | `ir.py` 中的 `TileMap` / `ImageLayer` / `ObjectLayer` / `MapObject` / `Sprite` / `SpriteFrame` |
-| **writer** | 读 IR,序列化为特定 target 格式 | `tiled/write_tmx.py` (IR.TileMap → .tmx)<br>`tiled/write_tsx.py` (IR.Sprite → .tsx) |
+| **parser** | 读特定 source 的原始格式,产出 IR dataclass | `pixellab/parse_sprite.py` (角色导出 → `IR.Sprite`) |
+| **IR** | tool-agnostic 中间表示 | `ir.py` 的 `Sprite` / `SpriteFrame` |
+| **writer** | 读 IR,序列化为特定 target 格式 | `tiled/write_tsx.py` (IR.Sprite → .tsx) |
 
 ## 解耦契约 (load-bearing rules)
 
@@ -53,18 +65,8 @@ IR 是契约的核心。加字段意味着:
 
 ```python
 # ir.py
-@dataclass class MapObject:    x, y, width, height, name, object_type, properties
-@dataclass class ObjectLayer:  name, objects[]
-@dataclass class ImageLayer:   name, image_path, image_width, image_height
-@dataclass class TileMap:      name, width, height, tile_width, tile_height, layers[], properties
 @dataclass class SpriteFrame:  image_path, width, height, direction
 @dataclass class Sprite:       name, frames[], properties
 ```
 
-不含的(目前来说不必要):
-- 真正的 tile layer (per-cell tile data) — MVP 用 image layer 即可
-- Wang tileset 配置 — 暂未实装(pixellab composite 已足够)
-- 动画帧时间轴 — 等设计师产 sprite animation 样本再说
-- Custom polygon collision — 用 ObjectLayer.objects 的 width/height 矩形即可
-
-需要时再加,**别预先抽象**。
+加 IR 类型应有真实下游消费场景。**不预先抽象**。

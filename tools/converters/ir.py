@@ -8,51 +8,16 @@ data (e.g. pixellab JSON) directly.
 
 This decoupling lets us swap pixellab for another tool (or Tiled for
 another engine target) by writing a single new module on either side.
+
+Current scope: only Sprite. Map / TileMap was deleted on 2026-05-05
+when the designer moved level editing fully into Tiled (no pixellab Map
+Editor in the pipeline anymore). If a future source needs richer IR
+types (animation timelines, multi-state sprites, etc.), add them here
+once with a real consumer in mind.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-
-
-@dataclass
-class MapObject:
-    """A free-form object inside an ObjectLayer (typically a collision rect)."""
-    x: float
-    y: float
-    width: float
-    height: float
-    name: str = ""
-    object_type: str = ""
-    properties: dict = field(default_factory=dict)
-
-
-@dataclass
-class ObjectLayer:
-    name: str
-    objects: list[MapObject] = field(default_factory=list)
-
-
-@dataclass
-class ImageLayer:
-    name: str
-    # path relative to the .tmx file location; set by orchestrator (CLI)
-    # after output layout is decided. Parser leaves this as "" if it can't
-    # know.
-    image_path: str
-    image_width: int
-    image_height: int
-
-
-@dataclass
-class TileMap:
-    """A complete map (becomes one .tmx)."""
-    name: str
-    width: int            # in tiles
-    height: int           # in tiles
-    tile_width: int       # in px
-    tile_height: int      # in px
-    layers: list = field(default_factory=list)   # mix of ImageLayer + ObjectLayer
-    properties: dict = field(default_factory=dict)
 
 
 @dataclass

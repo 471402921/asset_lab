@@ -9,3 +9,4 @@ tmp/
 temporary_asset/*
 !temporary_asset/.gitkeep
 
+.claude/

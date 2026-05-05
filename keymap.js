@@ -21,6 +21,16 @@ export const SPRITE_KEYMAP = {
   Equal: { action: 'zoom', value: '+1' },
   Minus: { action: 'zoom', value: '-1' },
   Digit0: { action: 'zoom', value: 'reset' },
+
+  // ─── STATE SLOT (未实装) ─────────────────────────────────────────────────
+  // 设计师未来要在 web 里模拟 sprite 各种状态(健康/受伤/睡觉/开心 等)。
+  // 等 pixellab 状态导出 schema 定型后, 在这里加 Digit1..Digit9 之类绑定:
+  //   Digit1: { action: 'state', value: 'idle' },
+  //   Digit2: { action: 'state', value: 'walking' },
+  //   ...
+  // 触发后会进 modes/sprite_preview.js 的 _dispatch 'state' 分支(目前 throw)。
+  // 详见 modes/sprite_preview.js 顶部 STATE SLOT 注释块。
+  // ─────────────────────────────────────────────────────────────────────────
 };
 
 export const ANIMATION_DEFAULT_FPS = 8;

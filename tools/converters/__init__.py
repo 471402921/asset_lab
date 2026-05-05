@@ -10,6 +10,8 @@ Architecture:
 - Adding a new target = new writer, IR + parsers unchanged.
 
 Currently supported:
-    sources: pixellab/  (Map Editor export, character export)
-    targets: tiled/     (.tmx, .tsx)
+    sources: pixellab/  (character export only — Map Editor was dropped
+                        on 2026-05-05 when designer moved level editing
+                        into Tiled directly)
+    targets: tiled/     (.tsx via image collection)
 """
