@@ -123,6 +123,7 @@ Hard rules around deploy:
 Primary user is one designer using Claude Code in VS Code + Tiled (GUI level editor) + pixellab (sprite + basic PNG generation).
 
 - **Sprite preview tweaks**: if designer wants "show animation FPS" or "switch sprite via Tab", that's vibe-code-able in `modes/sprite_preview.js` (~30-80 LOC at a time, per plan §9).
+- **Designer edits the filesystem, not `metadata.json`.** She renames pixellab asset directories directly; metadata only updates when she re-exports from pixellab UI. So metadata can drift relative to disk between exports. **Disk is canonical** — when they diverge, rewrite metadata.json to match disk (don't ask "which is right"). Re-run the converter if `frames.rotations` changed. Confirmed across 3 yellow_Shiba rounds on 2026-05-05.
 - **state_key naming**: designer renames at pixellab source to semantic names (`idle` / `walking` / `sleeping` / `lying` / `crouch` etc.). asset-lab does NOT maintain an alias map. Phaser `preview/main.js` finds walking/idle by substring heuristic — designer's semantic names will hit cleanly.
 - **Adding per-anim FPS**: if designer wants different speeds per state (currently all 8 fps), add `frames.animations[state].fps` to metadata + read it in sprite_loader.js + apply in both sprite_preview RAF and Phaser anim. Don't pre-implement.
 - **Converter changes**: if a new pixellab field appears or a new Tiled convention is needed, that's a converter change. Stay in the parser/writer split; don't blob logic into the CLI orchestrator.
