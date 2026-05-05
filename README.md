@@ -40,10 +40,10 @@ python3 tools/pixellab_to_tiled.py --help
 ### 改地图 / 关卡(Tiled 编辑 + asset-lab 预览跑)
 
 ```
-1. (可选) pixellab 生成基础 tile / 家具 / UI 单 PNG → 拷进 assets/ 对应位置
-2. Tiled 里手画 / 拼地图 / 配 collision / 摆 NPC
-3. Tiled 导出 .tmj (File > Save As 选 .tmj 格式), 勾选 Embed Tilesets
-4. 放到 assets/maps/level_001.tmj (路径 / 命名设计师定)
+1. (可选) pixellab 生成基础 tile / 家具 / UI 单 PNG → 拷进 assets/{tile,items,...} 对应位置
+2. Tiled 里手画 / 拼地图 / 配 collision (per-tile property `solid:true`) / 摆 NPC
+3. Tiled 导出 .tmj (File > Save As 选 .tmj 格式), .tsx 可外部引用
+4. 放到 assets/scenes/{name}/{name}.tmj (路径 / 命名设计师定;现行约定 assets/scenes/test/interior_test.tmj)
 5. 浏览器开 asset-lab → 切到 "level preview" 模式 → 立刻走起来
 6. git commit + push
 7. (cute_pet schema 稳定后) cute_pet 工程师 git pull → flame_tiled 加载新关卡
@@ -123,22 +123,33 @@ state_key 缺当前方向时自动 fallback 到 `south` 帧 (info 面板会标 `
 
 走路动画按 sprite `frames.animations` 里启发式找含 `walk` 的 state_key (设计师源头 semantic 命名后命中)。该方向缺 → south fallback → 静帧。停止时若 sprite 有 `idle`/`stand`/`breath` 段则播放,否则静帧。
 
-需要 `assets/maps/level_001.tmj` + `assets/sprites/yellow_Shiba/`(或其它默认 sprite,见 `preview/main.js` `DEFAULT_SPRITE_DIR`)才能跑;缺资源给友好空态。Phaser 是 lazy load (CDN),切到 level mode 第一次加载需 ~1-2 秒。详细约束见 [preview/README.md](preview/README.md)。
+需要 `assets/scenes/{name}/{name}.tmj` (现行 `interior_test.tmj`) + `assets/sprites/yellow_Shiba/`(或其它默认 sprite,见 `preview/main.js` `DEFAULT_MAP` / `DEFAULT_SPRITE_DIR`)才能跑;缺资源给友好空态。Phaser 是 lazy load (CDN),切到 level mode 第一次加载需 ~1-2 秒。详细约束见 [preview/README.md](preview/README.md)。
 
 ---
 
 ## 目录结构
 
 ```
-assets/                              # 仓内资源 (设计师投放区, 由设计师定具体子目录约定)
-├── maps/                            # 设计师从 Tiled 导出的 .tmj + 引用的 PNG (Embed Tilesets)
-├── tilesets/                        # 设计师在 Tiled 里建的 .tsx + tile PNG (如不 embed)
+assets/                              # 仓内资源 (设计师定的目录约定, 2026-05-05 第二轮重构稳定)
+├── scenes/{name}/                   # Tiled 工程目录: .tmj + .tsx (外部引用 OK)
+├── tile/                            # 地形 tile atlas PNG (例: tilesets.png 240×240)
+├── wall/                            # 墙体 PNG (待第一批墙资源)
+├── items/                           # 道具 / 家具 PNG, 按"大类/子类"嵌套
+│   ├── furniture/{seating,storage,surfaces}/
+│   ├── decor/{art,plants,tabletop,textiles}/
+│   ├── lighting/{overhead,portable}/
+│   ├── electronics/{computing,gadgets}/
+│   ├── nature/{rocks,water}/
+│   └── personal/{instruments,wearables}/
 ├── sprites/{name}/                  # pixellab 角色资源
 │   ├── metadata.json                #   asset-lab sprite preview 读
 │   ├── rotations/{south,...}.png    #   pixellab 原 4 或 8 方向 (character.directions)
 │   ├── animations/{state}/{dir}/    #   动画帧 (semantic state_key, plan §13.1)
 │   └── {name}.tsx                   #   tools/pixellab_to_tiled.py 生成 (Tiled 用)
-└── audio/{music,sfx}/
+├── audio/                           # 音乐 / 音效 (扁平, 待第一批文件确定子目录)
+├── effects/                         # 特效 PNG / 序列 (待)
+├── fonts/                           # 字体 (待)
+└── ui/                              # UI PNG (待)
 
 temporary_asset/                     # workflow buffer, 内容 .gitignore (不进 git)
 
@@ -150,12 +161,14 @@ tools/                               # 转换 pipeline (sprite-only)
     └── tiled/                       # 输出生成器 (IR → Tiled)
 
 preview/                             # ★ 临时拐杖: Phaser 关卡运行时预览
-└── main.js                          # lazy-load Phaser CDN, 加载 .tmj, 玩家走+撞墙
+└── main.js                          # lazy-load Phaser CDN, 加载 .tmj (含外部 .tsx),
+                                     #   渲染 tile/object 层, solid:true 加碰撞
 
 docs/cute_pet_integration.md         # 给 cute_pet 工程师的契约 (DRAFT)
 
 modes/sprite_preview.js              # 浏览器 sprite 预览
 core/, loaders/, keymap.js, index.html
+deploy.sh, deploy/asset-lab-https.service, _https_server.py   # 部署到 1.14.190.95
 ```
 
 `assets/` 子目录约定由**设计师定**(她在 Tiled 里习惯什么布局就用什么),asset-lab 跟随。详见 [asset-lab-plan.md](asset-lab-plan.md)。

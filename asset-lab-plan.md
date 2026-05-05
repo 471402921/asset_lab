@@ -8,6 +8,14 @@
 
 ## 修订记录
 
+- **2026-05-05 (7th revision today) 设计师 round 2 目录重构 + 第一份真 .tmj 落地, preview 加外部 .tsx + object 渲染 + solid 碰撞**: 设计师交付 `assets/scenes/test/interior_test.tmj` (10×10 tile + 7 件日式家具 object) + 全新 `assets/` 顶级布局 (scenes/tile/wall/items/effects/fonts/ui)。preview 升级:
+  - **外部 .tsx 引用支持**: preview/main.js fetch .tsx + 解析 XML + 把 atlas / image-collection 转成 Tiled JSON embedded 格式塞回 Phaser cache, 绕开 Phaser 自身的 "External tilesets unsupported" 限制
+  - **object-layer tile-object 渲染**: per-object 按 gid 反查 tileset, image-collection 用 per-tile PNG, atlas tileset 在 object 里暂不支持 (warn skip)
+  - **`solid:true` 自动加静态碰撞**: per-tile property, tile layer + object 都生效。原 plan 写过的 `collides:true` 是空头猜测, 已对齐设计师选择
+  - **player.setDepth(10)**: 玩家始终在 tile / object 之上, 不会走进家具被盖
+  - **关卡文件名**: 设计师命名 `interior_test.tmj` (snake_case, 之前 `interior test.tmj` 带空格已修)。 metadata 内 `tilesets[].source` 之前是 iCloud 绝对路径 (设计师 Tiled 工程在 iCloud), 改成 sibling 文件名;.tsx 里 PNG 路径从 `../items/...` (一层上) 改成 `../../items/...` (两层上, 因为 .tsx 在 scenes/test/ 深 2 层)
+  - **目录布局** plan §14.2/§14.4 同步: scenes/{name}/ 替代 maps/, tile/ 替代 tilesets/, items/ 深嵌套, 加 wall/ effects/ fonts/ ui/
+  - 修文件名空格 + 设计师手抖 `ecor_screen_shoji.png` → `decor_` 拼写
 - **2026-05-05 (6th revision today) 加手机触屏 UI**: 设计师计划部署到自己服务器供手机访问。asset-lab 100% 键盘驱动,手机能"看不能点"。在 `index.html` 加触屏 UI DOM (sprite preview: state strip + DPad + 播放 + zoom; level preview: 浮动 DPad + zoom 按钮),`@media (pointer: coarse), (max-width: 900px)` 媒体查询命中才显示。**桌面键盘流程零回归** — 大屏 + 鼠标看到的页面跟之前一样。
   - sprite_preview.js 触屏按钮 → 复用 `_dispatch` (单一 action 入口键鼠触并联)
   - preview/main.js 共享 `touchState` 对象 (DOM pointerdown/up 写, scene.update() 跟 `this.keys` 并联读;zoom 按钮单触发用 `zoomTrigger` flag scene 消费后清)
@@ -640,25 +648,33 @@ assets/sprites/yellow_Shiba/
 
 地图和关卡编辑由设计师在 **Tiled** 里直接做并导出 `.tmx`,asset-lab 不参与转换。pixellab 在工作流里只产基础 PNG 元素 + 角色 sprite。cute_pet 用 `flame_tiled` 加载 `.tmx`。
 
-### 14.2 当前目录结构
+### 14.2 当前目录结构 (2026-05-05 第二轮设计师重构后)
 
 ```
 asset_lab/
-├── assets/                   # 设计师投放区, 子目录约定由设计师定 (跟随 Tiled 工程惯例)
-│   ├── maps/                 # 设计师从 Tiled 导出的 .tmx + 引用的 PNG
-│   ├── tilesets/             # 设计师在 Tiled 里建的 .tsx + tile PNG (基础 PNG 来自 pixellab)
-│   ├── sprites/{name}/       # pixellab character: metadata.json + rotations/ + .tsx
-│   └── audio/{music,sfx}/
+├── assets/                   # 设计师定的目录约定 (round 2 后稳定)
+│   ├── scenes/{name}/        # Tiled 工程目录: .tmj + .tsx (外部引用 OK)
+│   ├── tile/                 # 地形 tile atlas PNG (例: tilesets.png 240×240)
+│   ├── wall/                 # 墙体 PNG (待第一批墙资源)
+│   ├── items/{大类}/{子类}/   # furniture/{seating,storage,surfaces}/, decor/{art,plants,...},
+│   │                         # lighting/, electronics/, nature/, personal/ — 深嵌套
+│   ├── sprites/{name}/       # pixellab character: metadata.json + rotations/ + animations/ + .tsx
+│   ├── audio/                # (扁平, 待真音效定子目录)
+│   ├── effects/              # 特效 PNG / 序列 (待)
+│   ├── fonts/                # 字体 (待)
+│   └── ui/                   # UI PNG (待)
 ├── temporary_asset/          # workflow buffer, 内容 .gitignore
 ├── tools/
 │   ├── pixellab_to_tiled.py  # CLI, 只剩 --sprites
 │   └── converters/{ir.py, pixellab/parse_sprite.py, tiled/write_tsx.py}
 ├── docs/cute_pet_integration.md  # 给 cute_pet 工程师的契约 (DRAFT)
-├── modes/sprite_preview.js   # 含 STATE SLOT 注释槽位
+├── modes/sprite_preview.js
 ├── core/{renderer,input,version_guard}.js
 ├── loaders/{sprite_loader,_image}.js
-├── keymap.js                 # 只剩 SPRITE_KEYMAP, 含 STATE SLOT 注释
-└── index.html                # 只挂 sprite preview
+├── keymap.js                 # SPRITE_KEYMAP (含 state/anim 真实装)
+├── preview/main.js           # Phaser 关卡运行时 (临时拐杖, §14.7)
+├── deploy.sh + deploy/asset-lab-https.service + _https_server.py   # 部署 (§14.8)
+└── index.html                # 顶部 mode toggle (sprite / level)
 ```
 
 ### 14.3 Converter 分层架构(为换源/换目标解耦)
@@ -674,17 +690,19 @@ asset_lab/
 
 虽然现在只有一条 sprite pipeline,**分层契约不能塌方**。它是给"未来加新 source / target 时不重构"准备的(例如 pixellab v2、别的工具、Phaser format 等)。详细见 `tools/converters/README.md`。
 
-### 14.4 Tiled 约定
+### 14.4 Tiled 约定 (2026-05-05 第一份真 .tmj 落地后实测)
 
 | 约定 | 含义 | 谁产 |
 |---|---|---|
-| **关卡文件格式: .tmj** (Tiled JSON, Embed Tilesets) | Phaser preview / cute_pet flame_tiled 通用 | 设计师导出 |
-| sprite `.tsx` 里 tile property `direction` | "south" / "north-east" / 等 8 方向 | asset-lab converter |
-| `<objectgroup>`、`<imagelayer>`、tile collision、custom properties 等 | 关卡视觉、碰撞、家具摆放、地形语义 | 设计师在 Tiled 里直接画 |
-| `<objectgroup name="walls">` (临时约定) | 静态墙体 collision rects, asset-lab `preview/` 里 player 撞它 | 设计师在 Tiled 里建 |
-| tile property `collides:true` (临时约定) | 家具等 tile 级 collision, asset-lab `preview/` 自动识别 | 设计师在 Tiled tileset 编辑器里加 |
+| **关卡文件格式: .tmj** (Tiled JSON) | Phaser preview / cute_pet flame_tiled 通用 | 设计师导出 |
+| **外部 .tsx 引用允许** | preview/main.js 自动 fetch + parse XML, 不再要求 Embed Tilesets | 设计师 Tiled 里建 |
+| **关卡放 `assets/scenes/{name}/{name}.tmj`** | scenes 是顶级目录, 一个 .tmj 一个子目录便于跟相关 .tsx 同放 | 设计师 |
+| sprite `.tsx` 里 tile property `direction` | "south" / "east" / "north" / "west" (4 cardinals) | asset-lab converter |
+| **per-tile property `solid: true`** (bool) | tile 或 object 加碰撞;preview 自动加静态 body, cute_pet 也按此读 | 设计师在 Tiled tileset 编辑器里加 |
+| tile/object 文件名 | snake_case (空格用下划线), `decor_xxx.png` / `furniture_xxx.png` 前缀按目录类别命名 | 设计师 |
+| 旧约定 `<objectgroup name="walls">` (空 rect 当墙) | preview 仍兼容, 但当前 .tmj 没用, 走 per-tile solid 即可 | (legacy) |
 
-asset-lab 不强制 .tmj 的 layer 命名,但 `preview/` 临时拐杖**约定** `walls` 名字 (cute_pet 工程师后续接手时也按这个约定省事)。cute_pet 端约定见 `docs/cute_pet_integration.md`(DRAFT,等设计师约定稳定后同步)。
+⚠️ 历史遗留: 早期 plan 里写过 tile property `collides:true` 是猜测, 实际从未用过。设计师选了 **`solid:true`**。所有 doc / preview 已对齐。
 
 ### 14.5 sprite 状态切换 + 动画播放(2026-05-05 实装)
 

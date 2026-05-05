@@ -26,18 +26,20 @@ cute_pet 工程师在 `cute_pet/lib/demo/level_preview.dart` 写出 minimal demo
 ## 范围(严格框死)
 
 ✅ 做:
-- 加载 .tmj (Tiled JSON 格式, **设计师导出时勾选 Embed Tilesets**)
-- 玩家 8 方向移动 (WASD + QEZC, Arcade Physics 矩形碰撞)
-- 撞 walls object layer + tile-property `collides:true` 的家具
+- 加载 .tmj (Tiled JSON)
+- 支持外部 .tsx 引用 (Embed Tilesets 可勾可不勾):自动 fetch + parse XML + 解析 atlas 与 image-collection
+- 渲染 tile layers + object-layer 里的 gid tile-objects (家具、装饰)
+- 玩家 N 方向移动 (WASD / +QEZC, 跟 sprite 一致), Arcade Physics 矩形碰撞
+- per-tile property `solid: true` 自动加静态碰撞 (tile layer 与 object 都生效)
+- 兼容旧约定 `walls` object layer (空 rect 当墙, 已有的 .tmj 不改也跑)
 - 相机两档 zoom (远景 2× / 近景 4×, 按 X 切换), 跟随玩家
 - 缺 .tmj / 缺 sprite → 友好空态, 不启动 Phaser
 
 ❌ 不做:
 - 业务逻辑 / 状态机 / 任务 / 对话 / 背包 / NPC AI
-- sprite 状态切换 (沿用 sprite_preview 的 STATE SLOT 策略, 等 pixellab 状态导出 schema)
-- sprite 走路动画播放 (frames.animations 当前为空, 真样本来了再加)
-- 多关卡切换 UI (?map=xxx.tmj 是逃生口, 不做按钮)
-- NPC sprite 渲染 (设计师在 Tiled 摆的 NPC tile 暂不识别)
+- sprite 状态切换 UI (sprite_preview 那边逐个看, level preview 只自动播 walking/idle)
+- 多关卡切换 UI (`?map=xxx.tmj` 是逃生口, 不做按钮)
+- NPC sprite 渲染 (设计师在 Tiled 摆的 NPC tile 暂不识别, 等真有 sprite NPC 再加)
 - 触发器 / 场景跳转
 - 音频
 - Matter Physics (任意 polygon collision) — Arcade 矩形够
@@ -50,16 +52,18 @@ cute_pet 工程师在 `cute_pet/lib/demo/level_preview.dart` 写出 minimal demo
 
 ## 设计师工作流
 
-1. 在 Tiled 编辑关卡, **导出 .tmj** (File > Save As, 选 .tmj 格式; 或 File > Export As > JSON map files (*.tmj))
-2. **勾选 Embed Tilesets** (Map > Map Properties, 或导出对话框里; 这样 .tmj 自包含 tileset, Phaser 可直接吃)
-3. 保存到 `assets/maps/level_001.tmj`
-4. 浏览器开 `index.html`, 切到 "level preview" tab → 立刻能玩
+1. 在 Tiled 编辑关卡 (.tmj + 引用的 .tsx tilesets, 内部图集或 image-collection 都可)
+2. **导出 .tmj** (File > Save As, 选 .tmj 格式; 或 File > Export As > JSON map files (*.tmj))
+3. .tsx 可外部引用 (preview 自动 fetch),也可勾 Embed Tilesets (Map > Map Properties),两种 preview 都支持
+4. .tsx 里给会撞玩家的 tile 加 property `solid: true` (bool); 落地时 preview 会加静态碰撞体
+5. 保存到 `assets/scenes/{name}/{name}.tmj` (现行约定: `assets/scenes/test/interior_test.tmj`),.tsx 放 .tmj 同目录,引用的 PNG 放 `assets/{tile,items,wall,...}/` 对应分类
+6. 浏览器开 `index.html`, 切到 "level preview" tab → 立刻能玩
 
 ## 已知坑
 
-- **外部 .tsx 引用未支持**: 设计师必须 Embed Tilesets。如果 .tmj 用了 `"source": "...tsx"` 形式的 tileset 引用, preview 会打 warn 跳过该 tileset (那一层不渲染)
-- **走路动画无**: 玩家移动时只切方向, 不播帧动画。等 pixellab 出非空 `frames.animations` 样本后扩
-- **没有 NPC**: Tiled 里摆的 sprite tile object 暂不渲染玩家以外的角色
+- **走路动画**: 玩家移动时按 sprite `frames.animations` 启发式找 `walk` state 播帧,缺方向 fallback 到 south。停止时若 sprite 有 `idle`/`stand`/`breath` 段则播放,否则静帧。
+- **NPC 不渲染**: Tiled 里摆的 sprite tile object 暂不认 (object 渲染只走 tile-image,sprite-as-tile 概念未支持)
+- **atlas-style tileset 在 object layer 用**: 假设场景里某个 object 的 gid 引到 atlas tileset 的 sub-tile, preview 当前只能渲染 image-collection 的 per-tile image,会 console.warn + skip。设计师当前 .tmj 全用 image-collection 摆 object 故无影响
 
 ## 给后续维护者
 

@@ -5,9 +5,11 @@
  * 整个 preview/ 目录拆掉。不要让本目录蔓延业务逻辑。
  *
  * 范围:
- *   - 加载 .tmj (Tiled JSON)
+ *   - 加载 .tmj (Tiled JSON), 支持外部 .tsx 引用 (atlas 与 image-collection)
+ *   - 渲染 tile layers + object-layer 里的 gid tile-objects
  *   - 玩家方向数跟随 sprite (4-dir: WASD, 8-dir: WASD + QEZC), Arcade Physics 矩形碰撞
- *   - 撞 walls object layer + 撞家具 (per-tile collision via Tiled)
+ *   - tile / object 上的 per-tile property `solid: true` → 静态碰撞体
+ *   - 兼容旧约定 `walls` object layer (空 rect 当墙)
  *   - 相机两档 zoom (远景 2× / 近景 4×, 按 X 切换), 跟随玩家
  *   - 玩家移动时播 walking 动画 (按 plan §13.1 fallback chain), 停止时播 idle 段
  *     (启发式按 state_key 名字找 walk/idle, 设计师 semantic 命名后命中)
@@ -22,10 +24,11 @@
  *   - 多关卡切换 UI (?map=xxx.tmj 是逃生口)
  *   - 音频 (Phaser audio 留给真用时再加)
  *   - pinch-to-zoom / swipe 手势 (破坏整数像素纯度 + 跟原生浏览器手势冲突)
+ *   - 非 gid 类型的 object (rectangle / polygon 区域、trigger 等) — 当前只识别 gid 对象
  */
 
 const PHASER_CDN = 'https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js';
-const DEFAULT_MAP = 'assets/maps/level_001.tmj';
+const DEFAULT_MAP = 'assets/scenes/test/interior_test.tmj';
 const DEFAULT_SPRITE_DIR = 'assets/sprites/yellow_Shiba';
 
 // 远景 (整张地图视野) / 近景 (玩家周围细节)
@@ -35,8 +38,7 @@ const DEFAULT_ZOOM_INDEX = 0;
 const PLAYER_SPEED = 120;   // px/s
 const ANIMATION_FPS = 8;
 
-// 动画 state_key 启发式 (设计师源头命名应是 semantic, 如 "walking" / "idle")。
-// 如果 yellow_Shiba 第一只样本的长 prompt-derived key 还在, 仍能命中 (含 'walk')。
+// 动画 state_key 启发式 (设计师源头命名应是 semantic, 如 "walk" / "idle")。
 const WALKING_NAME_HINTS = ['walk'];
 const IDLE_NAME_HINTS = ['idle', 'stand', 'breath', 'rest'];
 
@@ -167,8 +169,6 @@ export class LevelPreviewMode {
       roundPixels: true,
       backgroundColor: '#000',
       scale: {
-        // FIT 让 Phaser canvas 在 #game 父容器里按比例缩放,
-        // 桌面 #game 是 640×640 固定, mobile 是 100vw × calc(100vh - 50px)
         mode: window.Phaser.Scale.FIT,
         autoCenter: window.Phaser.Scale.CENTER_BOTH,
         width: 640,
@@ -183,13 +183,6 @@ export class LevelPreviewMode {
 
     if (this.levelTouch) this._wireTouchUI(spriteMeta);
   }
-
-  /* ────────────────────────────────────────────────────────────────────────
-   * Touch UI wiring (mobile only via @media; listeners 安全挂在桌面也无害)
-   * DPad 按钮按 sprite 真实方向数过滤 (4-dir sprite 隐藏 4 个对角线按钮)。
-   * pointerdown/up 写 touchState[dir] 布尔, scene.update() 跟键盘并联读。
-   * zoom 按钮单触发: 写 touchState.zoomTrigger = true, scene 消费后清。
-   * ──────────────────────────────────────────────────────────────────────── */
 
   _wireTouchUI(spriteMeta) {
     const availableDirs = new Set(Object.keys(spriteMeta.frames.rotations));
@@ -252,7 +245,6 @@ export class LevelPreviewMode {
   }
 
   _showEmpty(what, why, expectedPath) {
-    // 空态时隐藏触屏 UI (game 没起来, DPad 也无意义)
     if (this.levelTouch) this.levelTouch.classList.remove('active');
     this.emptyStateElement.innerHTML = `
       <h2>关卡预览启动失败</h2>
@@ -280,8 +272,9 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
   const moveKeys = Object.fromEntries(
     Object.entries(MOVE_KEYS).filter(([, m]) => availableDirs.has(m.dir))
   );
-  // touchState 兜底: 桌面端 LevelPreviewMode 没传 (没 levelTouch) 时给个空对象
   const touch = touchState ?? {};
+
+  const mapDir = mapPath.substring(0, mapPath.lastIndexOf('/') + 1);
 
   return class PreviewScene extends window.Phaser.Scene {
     constructor() {
@@ -290,13 +283,14 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
     }
 
     preload() {
-      this.load.tilemapTiledJSON('level', mapPath);
-      // sprite: 8 方向各一 PNG (pixellab metadata.frames.rotations)
+      // 把 .tmj 当 raw JSON 拉, 我们要在 create 里给 source-only tileset 注入
+      // embedded 数据后再喂回 Phaser, 否则它的 tilemap parser 见 source 直接 skip。
+      this.load.json('level_raw', mapPath);
+      // sprite rotations
       for (const [dir, relPath] of Object.entries(spriteMeta.frames.rotations)) {
         this.load.image(`player_${dir}`, `${spriteDir}/${relPath}`);
       }
-      // animations: 每个 state_key × 每个 direction × 每帧, 全 preload
-      // (实测 yellow_Shiba 5 anim 总计 ~70 张 60×60 PNG, 不大)
+      // sprite animation frames
       const anims = spriteMeta.frames?.animations ?? {};
       for (const [stateKey, dirMap] of Object.entries(anims)) {
         for (const [dir, framePaths] of Object.entries(dirMap)) {
@@ -315,63 +309,208 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
       return `play:${stateKey}:${dir}`;
     }
 
-    create() {
-      this.map = this.make.tilemap({ key: 'level' });
+    /* ──────────────────────────────────────────────────────────────────────
+     * create(): 关键点 — Phaser 的 tilemap parser 见到外部 .tsx (source 字段)
+     * 会 warn + skip 整条 tileset, 整张地图就废了。所以我们自己:
+     *   1. 把 raw .tmj 从 cache 拿出来 (preload 时已用 load.json 装入)
+     *   2. 对每个 source-only tileset, fetch .tsx + 解析 XML, 转成 Tiled JSON
+     *      embedded 格式 (image / tiles / 尺寸都齐) 替换原 source 条目
+     *   3. 排队所有 PNG (atlas + per-tile image) 进 load 队列
+     *   4. 把改造好的 tmj inject 进 cache.tilemap (覆盖旧 entry)
+     *   5. load.start() 触发 PNG 加载, complete 后 _buildLevel()
+     * 副产品: tilesetData 仍记一份 (per-tile properties + imageKey 索引,
+     * object-layer 渲染时按 gid 反查用)
+     * ────────────────────────────────────────────────────────────────────── */
+    async create() {
+      const rawTmj = this.cache.json.get('level_raw');
+      if (!rawTmj) {
+        console.error('[preview] level_raw JSON missing from cache');
+        return;
+      }
+      // tilesetData[]: { name, firstgid, imageKey?, tiles: { [localId]: {imageKey, properties} } }
+      this.tilesetData = [];
+      this._tilemapReady = false;
 
-      // 加载 tileset images. 约定: 设计师在 Tiled 导出 .tmj 时勾选
-      // "Embed tilesets" (或单个 tileset 的 "Embed in map"), 这样 .tmj
-      // 自包含 tileset 数据, Phaser 直接吃。外部 .tsx 引用未来再支持。
-      const tilesetImageKeys = [];
-      for (const ts of this.map.tilesets) {
-        // ts.image 是 Tiled 里 tileset 引用的 PNG (相对 .tmj 路径)
-        const imgRel = ts.image || (ts.source ? null : null);
-        if (!imgRel) {
-          console.warn(
-            `[preview] tileset "${ts.name}" 是外部 .tsx 引用 (Phaser 当前不支持). ` +
-              `请在 Tiled 里改为 Embed Tilesets, 或等 preview 升级。`
-          );
+      const newTilesets = [];
+      for (const ts of rawTmj.tilesets) {
+        if (ts.image) {
+          // 已 embedded (设计师勾了 Embed Tilesets), 直接用 + 排队 PNG
+          const tsd = {
+            name: ts.name,
+            firstgid: ts.firstgid,
+            tileWidth: ts.tilewidth,
+            tileHeight: ts.tileheight,
+            tiles: {},
+            imageKey: `ts_atlas_${ts.name}`,
+          };
+          this.load.image(tsd.imageKey, _resolveUrl(mapDir, ts.image));
+          // 提取 per-tile properties (embedded image-collection 也走这里)
+          (ts.tiles || []).forEach((t) => {
+            tsd.tiles[t.id] = {
+              properties: _propsFromTiledArray(t.properties),
+              imageKey: t.image ? `tile_${ts.name}_${t.id}` : undefined,
+            };
+            if (t.image) this.load.image(tsd.tiles[t.id].imageKey, _resolveUrl(mapDir, t.image));
+          });
+          this.tilesetData.push(tsd);
+          newTilesets.push(ts);
           continue;
         }
-        const key = `ts_${ts.name}`;
-        // Phaser 要求 image 已 preload; 这里 lazy load 不太行 —
-        // 改在 preload 阶段做。重构: 把 tileset image 加载移到 preload。
-        // 但 preload 时还没 tilemap 信息……所以两阶段: preload tilemap →
-        // create 里再启第二个 scene 或用 dynamic load。
-        // 简化: 用 this.load 在 create 里再开一次 (Phaser 支持中途 load)
-        this.load.image(key, this._resolveTilesetImage(mapPath, imgRel));
-        tilesetImageKeys.push({ ts, key });
+        if (!ts.source) continue;
+
+        // External .tsx — fetch + parse + 转成 embedded 格式
+        const tsxUrl = _resolveUrl(mapDir, ts.source);
+        let xml;
+        try {
+          const text = await fetch(tsxUrl).then((r) => {
+            if (!r.ok) throw new Error(`HTTP ${r.status} ${tsxUrl}`);
+            return r.text();
+          });
+          xml = new DOMParser().parseFromString(text, 'application/xml');
+          const parseErr = xml.querySelector('parsererror');
+          if (parseErr) throw new Error(`XML parse error in ${tsxUrl}: ${parseErr.textContent}`);
+        } catch (e) {
+          console.warn(`[preview] failed to load tileset ${ts.name}:`, e.message);
+          continue;
+        }
+        const tsxDir = tsxUrl.substring(0, tsxUrl.lastIndexOf('/') + 1);
+        const root = xml.querySelector('tileset');
+        if (!root) {
+          console.warn(`[preview] ${tsxUrl}: no <tileset> root`);
+          continue;
+        }
+
+        const name = ts.name || root.getAttribute('name');
+        const tileWidth = parseInt(root.getAttribute('tilewidth'), 10) || 0;
+        const tileHeight = parseInt(root.getAttribute('tileheight'), 10) || 0;
+        const tileCount = parseInt(root.getAttribute('tilecount'), 10) || 0;
+        const columns = parseInt(root.getAttribute('columns'), 10) || 0;
+
+        const tsd = { name, firstgid: ts.firstgid, tileWidth, tileHeight, tiles: {} };
+
+        // 转 Tiled JSON embedded 格式 (Phaser 能吃)
+        const embedded = {
+          firstgid: ts.firstgid,
+          name,
+          tilewidth: tileWidth,
+          tileheight: tileHeight,
+          tilecount: tileCount,
+          columns,
+          margin: 0,
+          spacing: 0,
+        };
+
+        // Atlas style: <tileset> 直接子元素 <image>
+        const directImage = Array.from(root.children).find((c) => c.tagName === 'image');
+        if (directImage) {
+          const src = directImage.getAttribute('source');
+          const key = `ts_atlas_${name}`;
+          this.load.image(key, _resolveUrl(tsxDir, src));
+          tsd.imageKey = key;
+          embedded.image = src;       // Phaser parser 用 (虽然我们不靠它装 image)
+          embedded.imagewidth = parseInt(directImage.getAttribute('width'), 10) || 0;
+          embedded.imageheight = parseInt(directImage.getAttribute('height'), 10) || 0;
+        }
+
+        // Per-tile <tile id="N"> blocks (image-collection 或 atlas 上加属性都走这里)
+        const embeddedTiles = [];
+        root.querySelectorAll(':scope > tile').forEach((tileNode) => {
+          const id = parseInt(tileNode.getAttribute('id'), 10);
+          const tileData = { properties: {} };
+          const propsArray = [];
+          tileNode.querySelectorAll(':scope > properties > property').forEach((prop) => {
+            const pname = prop.getAttribute('name');
+            const ptype = prop.getAttribute('type') || 'string';
+            const praw = prop.getAttribute('value');
+            let pval = praw;
+            if (ptype === 'bool') pval = praw === 'true';
+            else if (ptype === 'int') pval = parseInt(praw, 10);
+            else if (ptype === 'float') pval = parseFloat(praw);
+            tileData.properties[pname] = pval;
+            propsArray.push({ name: pname, type: ptype, value: pval });
+          });
+          const imgEl = tileNode.querySelector(':scope > image');
+          const tileEntry = { id };
+          if (imgEl) {
+            const src = imgEl.getAttribute('source');
+            const key = `tile_${name}_${id}`;
+            this.load.image(key, _resolveUrl(tsxDir, src));
+            tileData.imageKey = key;
+            tileEntry.image = src;
+            tileEntry.imagewidth = parseInt(imgEl.getAttribute('width'), 10) || 0;
+            tileEntry.imageheight = parseInt(imgEl.getAttribute('height'), 10) || 0;
+          }
+          if (propsArray.length) tileEntry.properties = propsArray;
+          embeddedTiles.push(tileEntry);
+          tsd.tiles[id] = tileData;
+        });
+        if (embeddedTiles.length) embedded.tiles = embeddedTiles;
+
+        this.tilesetData.push(tsd);
+        newTilesets.push(embedded);
       }
 
-      // 第二次 load 完成后再继续
-      this.load.once('complete', () => this._buildLevel(tilesetImageKeys));
+      // 替换 raw tmj 的 tilesets, 重写 cache entry, 让 Phaser 看到全 embedded 视图
+      const patchedTmj = { ...rawTmj, tilesets: newTilesets };
+      // 用 Phaser tilemap parser 期待的格式塞回 cache (覆盖旧 entry)
+      this.cache.tilemap.remove('level');
+      this.cache.tilemap.add('level', { format: window.Phaser.Tilemaps.Formats.TILED_JSON, data: patchedTmj });
+
+      // 所有 PNG 排队后, 启动 load。complete 后构建 tilemap + 关卡。
+      this.load.once('complete', () => {
+        this.map = this.make.tilemap({ key: 'level' });
+        this._buildLevel();
+      });
       this.load.start();
     }
 
-    _resolveTilesetImage(mapAbsPath, imgRelToTmj) {
-      // mapPath e.g. "assets/maps/level_001.tmj"
-      // imgRel e.g. "../tilesets/foo/tile.png" (相对 .tmj 文件)
-      const dir = mapAbsPath.substring(0, mapAbsPath.lastIndexOf('/') + 1);
-      // 简化: 直接拼, 浏览器会规范 ../
-      return new URL(dir + imgRelToTmj, window.location.href).pathname.slice(1);
+    _findTilesetByGid(gid) {
+      // 找到 firstgid 最大但仍 <= gid 的 tileset
+      let best = null;
+      for (const tsd of this.tilesetData) {
+        if (tsd.firstgid <= gid && (!best || tsd.firstgid > best.firstgid)) {
+          best = tsd;
+        }
+      }
+      return best;
     }
 
-    _buildLevel(tilesetImageKeys) {
-      // 注册所有 tileset
-      const tilesets = tilesetImageKeys.map(({ ts, key }) =>
-        this.map.addTilesetImage(ts.name, key)
-      );
-
-      // 创建所有 tile layer
-      for (const layerData of this.map.layers) {
-        const layer = this.map.createLayer(layerData.name, tilesets);
-        if (layer) layer.setCollisionByProperty({ collides: true });
+    _buildLevel() {
+      // 1. Phaser 注册有 atlas image 的 tileset (供 tile layers 用)
+      // 外部 .tsx 时 Phaser 自己 tileWidth=0, 所以传 tsd.tileWidth/tileHeight 覆盖。
+      const phaserTilesets = [];
+      for (const tsd of this.tilesetData) {
+        if (tsd.imageKey) {
+          const ts = this.map.addTilesetImage(
+            tsd.name,
+            tsd.imageKey,
+            tsd.tileWidth,
+            tsd.tileHeight
+          );
+          if (ts) {
+            phaserTilesets.push(ts);
+          } else {
+            console.warn(`[preview] addTilesetImage(${tsd.name}) returned null`);
+          }
+        }
       }
 
-      // 玩家初始位置: 'spawn' object (如有), 否则地图中心
-      const spawnX = this.map.widthInPixels / 2;
-      const spawnY = this.map.heightInPixels / 2;
-      let startX = spawnX;
-      let startY = spawnY;
+      // 2. tile layers (Phaser 已经把 tile/object 拆开,this.map.layers 全是 tile layer)
+      const tileLayers = [];
+      for (const layerData of this.map.layers) {
+        const layer = this.map.createLayer(layerData.name, phaserTilesets);
+        if (layer) {
+          // 约定: 设计师在 .tsx 里给需要碰撞的 tile 标 `solid:true`
+          layer.setCollisionByProperty({ solid: true });
+          tileLayers.push(layer);
+        } else {
+          console.warn(`[preview] createLayer(${layerData.name}) returned null`);
+        }
+      }
+
+      // 3. spawn 位置 (找 spawn object,否则地图中心)
+      let startX = this.map.widthInPixels / 2;
+      let startY = this.map.heightInPixels / 2;
       const objLayers = this.map.objects || [];
       for (const ol of objLayers) {
         for (const obj of ol.objects) {
@@ -382,11 +521,11 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
         }
       }
 
-      // Player
+      // 4. Player
       this.player = this.physics.add.sprite(startX, startY, 'player_south');
       this.player.facing = 'south';
       this.player.setCollideWorldBounds(true);
-      // body 缩小一点, 给 sprite 视觉留余地 (玩家像素 60×60, body 用 32×32 中心)
+      this.player.setDepth(10);     // 玩家始终在 tile / object 之上, 避免走进家具时被盖住
       const bodyW = Math.min(this.player.width, 32);
       const bodyH = Math.min(this.player.height, 32);
       this.player.body.setSize(bodyW, bodyH);
@@ -395,9 +534,8 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
         (this.player.height - bodyH) / 2
       );
 
-      // 注册 Phaser anims (一段 frames.animations[state][dir] → 一个 anim key)
-      // + 启发式找 walking / idle 的 state_key
-      this.animsByDir = {};   // { stateKey: { direction: animKey } }
+      // 5. Phaser anims (一段 frames.animations[state][dir] → 一个 anim key)
+      this.animsByDir = {};
       const anims = spriteMeta.frames?.animations ?? {};
       for (const [stateKey, dirMap] of Object.entries(anims)) {
         this.animsByDir[stateKey] = {};
@@ -419,12 +557,46 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
       this.idleKey = findKey(IDLE_NAME_HINTS);
       this.currentAnimKey = null;
 
-      // Walls / collision: 尝试找 'walls' object layer 并加 static body
+      // 6. Object-layer tile-objects 渲染 + solid 碰撞
+      // Tiled tile-object: x/y 是底-左角, 不是中心。我们换算到中心好放 origin (0.5, 0.5)。
+      this.solidsGroup = this.physics.add.staticGroup();
+      for (const ol of objLayers) {
+        // 'walls' object layer 是旧约定 (空 rect 当墙), 放到 7. 处理
+        if (ol.name === 'walls') continue;
+        for (const obj of ol.objects) {
+          if (!obj.gid) continue;   // 非 gid object (rect / polygon / point) 暂不渲
+          const tsd = this._findTilesetByGid(obj.gid);
+          if (!tsd) continue;
+          const localId = obj.gid - tsd.firstgid;
+          const tileData = tsd.tiles[localId] ?? {};
+          const imageKey = tileData.imageKey ?? tsd.imageKey;
+          if (!imageKey) {
+            // atlas 类 tileset 在 object layer 里渲染需要 sub-region, 暂不支持
+            console.warn(
+              `[preview] gid ${obj.gid} (${tsd.name}#${localId}) is from atlas tileset; ` +
+                `object-layer rendering needs per-tile image. Skipping.`
+            );
+            continue;
+          }
+          const cx = obj.x + obj.width / 2;
+          const cy = obj.y - obj.height / 2;
+          if (tileData.properties?.solid) {
+            const sprite = this.solidsGroup.create(cx, cy, imageKey);
+            sprite.body.setSize(obj.width, obj.height);
+            sprite.refreshBody();
+          } else {
+            this.add.image(cx, cy, imageKey);
+          }
+        }
+      }
+      this.physics.add.collider(this.player, this.solidsGroup);
+
+      // 7. 旧约定 'walls' object layer (空 rect 当 static body)
       const wallsLayer = objLayers.find((ol) => ol.name === 'walls');
       if (wallsLayer) {
         const wallsGroup = this.physics.add.staticGroup();
         for (const obj of wallsLayer.objects) {
-          if (obj.width <= 0 || obj.height <= 0) continue;
+          if (obj.width <= 0 || obj.height <= 0 || obj.gid) continue;
           const rect = wallsGroup
             .create(obj.x + obj.width / 2, obj.y + obj.height / 2, null)
             .setSize(obj.width, obj.height)
@@ -434,19 +606,18 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
         this.physics.add.collider(this.player, wallsGroup);
       }
 
-      // Tile-based collision (家具 etc., 通过 tile property collides:true)
-      for (const layerData of this.map.layers) {
-        const layer = this.map.getLayer(layerData.name)?.tilemapLayer;
-        if (layer) this.physics.add.collider(this.player, layer);
+      // 8. tile-layer tile-property `solid:true` (家具也可这么标,虽然这个 scene 没用)
+      for (const layer of tileLayers) {
+        this.physics.add.collider(this.player, layer);
       }
 
-      // Camera
+      // 9. Camera
       this.cameras.main.setBounds(0, 0, this.map.widthInPixels, this.map.heightInPixels);
       this.cameras.main.startFollow(this.player, true, 0.15, 0.15);
       this.cameras.main.setZoom(ZOOM_LEVELS[this.zoomIndex]);
       this.physics.world.setBounds(0, 0, this.map.widthInPixels, this.map.heightInPixels);
 
-      // Input
+      // 10. Input
       this.keys = this.input.keyboard.addKeys('W,A,S,D,Q,E,Z,C,X');
 
       // X 切 zoom
@@ -456,11 +627,12 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
         this._updateInfo();
       });
 
+      this._tilemapReady = true;
       this._updateInfo();
     }
 
     update() {
-      if (!this.player) return;
+      if (!this._tilemapReady || !this.player) return;
 
       // Touch zoom 单触发 (DOM 按钮 pointerdown 写 true, scene 消费后清)
       if (touch.zoomTrigger) {
@@ -500,13 +672,13 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
       const isMoving = vx !== 0 || vy !== 0;
       const desiredAnimKey = this._pickAnimKey(isMoving);
 
+      const animChanged = desiredAnimKey !== this.currentAnimKey;
       if (desiredAnimKey) {
-        if (this.currentAnimKey !== desiredAnimKey) {
+        if (animChanged) {
           this.player.play(desiredAnimKey, true);
           this.currentAnimKey = desiredAnimKey;
         }
       } else {
-        // 没动画可播 → 静帧 (按 facing 选 rotation)
         if (this.currentAnimKey) {
           this.player.stop();
           this.currentAnimKey = null;
@@ -514,7 +686,7 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
         this.player.setTexture(`player_${this.player.facing}`);
       }
 
-      if (facingChanged || (isMoving && !desiredAnimKey)) {
+      if (facingChanged || animChanged) {
         this._updateInfo();
       }
     }
@@ -528,8 +700,8 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
         if (!dirMap) return null;
         return dirMap[dir] ?? dirMap.south ?? null;
       };
-      if (isMoving) return tryState(this.walkingKey);   // 走 → 走路 anim, 缺方向回 south
-      return tryState(this.idleKey);                     // 停 → idle anim (若有, 通常只 south)
+      if (isMoving) return tryState(this.walkingKey);
+      return tryState(this.idleKey);
     }
 
     _updateInfo() {
@@ -546,4 +718,16 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
       );
     }
   };
+}
+
+// 把 baseDir + relPath 合成相对于 web root 的路径 (浏览器自己 normalize ../)
+function _resolveUrl(baseDir, relPath) {
+  return new URL(baseDir + relPath, window.location.href).pathname.slice(1);
+}
+
+// Tiled JSON properties 是 [{name,type,value}, ...] 数组, 转 {name: value} 对象
+function _propsFromTiledArray(arr) {
+  const obj = {};
+  for (const p of arr || []) obj[p.name] = p.value;
+  return obj;
 }

@@ -338,7 +338,7 @@
         btnLevel.classList.add('active');
         btnSprite.classList.remove('active');
         els.canvas.style.display = 'none';
-        els.gameElement.style.display = '';
+        els.gameElement.style.display = 'block';
         els.levelTouch.classList.add('active');
         // Lazy-load Phaser preview runtime (临时拐杖, 见 preview/README.md)
         const { LevelPreviewMode } = await import('./preview/main.js');

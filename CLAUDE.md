@@ -19,6 +19,7 @@ Plus a **temporary scaffold**: **Browser level runtime preview** ([preview/](pre
 - 2026-05-05 (4th revision): sprite animation + state switching landed (STATE SLOT placeholder → real impl) when first sprite arrived
 - 2026-05-05 (5th revision): sprite cut to 4-cardinal directions; code became sprite-driven for direction count; sprite schema 雏形 declared stable
 - 2026-05-05 (6th revision): mobile touch UI added (sprite + level both); media-query gated, zero desktop regression
+- 2026-05-05 (7th revision): final assets/ directory layout settled (scenes/ replaces maps/, tile/ replaces tilesets/, items/ deeply categorized, +effects/fonts/ui/wall); preview/main.js gains external .tsx loader + object-layer tile-object rendering + `solid:true` collision (designer shipped first real .tmj `interior_test.tmj`)
 
 ## What this tool is (and is NOT)
 
@@ -55,7 +56,8 @@ These are load-bearing decisions, not preferences. From plan §9.
 - **Don't replace Tiled.** No in-browser level editor. No level JSON schema. If feature seems to need it, push back to "let designer use Tiled."
 - **Don't reintroduce map conversion.** Designer dropped it deliberately. If feature seems to need it, ask the user why first.
 - **Don't write Flutter/Dart code in this repo.** cute_pet is its own project. We write specs in [docs/cute_pet_integration.md](docs/cute_pet_integration.md), they implement.
-- **`assets/` subdirectory layout is owned by the designer.** When she finalizes Tiled-side conventions, asset-lab follows. Don't impose structure top-down.
+- **`assets/` subdirectory layout is owned by the designer.** Designer finalized 2026-05-05 (round 2 restructure): `scenes/{name}/` (Tiled `.tmj`+`.tsx`), `tile/` (terrain atlases), `wall/`, `items/{大类}/{子类}/` (deeply nested), `sprites/{name}/`, `audio/`, `effects/`, `fonts/`, `ui/`. asset-lab follows; don't impose new top-level dirs without checking.
+- **Tiled collision property is `solid: true`** (bool, on per-tile properties in the `.tsx`). NOT `collides:true` — that was an early plan guess, never used. preview/ scaffold reads `solid`. cute_pet should too.
 
 ### `preview/` temporary scaffold rules
 
@@ -64,7 +66,7 @@ These are load-bearing decisions, not preferences. From plan §9.
 - **Lazy-load Phaser via CDN `<script>` tag.** No npm, no bundling, no offline copy. The lazy load is intentional so the sprite-preview path stays fast and Phaser-free.
 - **Single-file `preview/main.js`.** Don't split into scene/player/etc. — small surface area, easier to delete entirely when cute_pet engineer ships their demo entry.
 - **Keep it boring.** Player walks, walls/furniture stop it, camera follows with two zoom levels. That's it. No state machines, NPC AI, dialogue, inventory, audio, save/load, mobile gestures (pinch / swipe), multi-level switching UI, etc. — those are all cute_pet's job.
-- **`.tmj` only (not `.tmx`).** Phaser eats Tiled JSON natively; flame_tiled also supports `.tmj`. Designer must Embed Tilesets when exporting.
+- **`.tmj` only (not `.tmx`).** Phaser eats Tiled JSON natively; flame_tiled also supports `.tmj`. **External `.tsx` references are supported** (preview/main.js fetches them, parses XML, splices into Phaser's tilemap cache as embedded data) — Embed Tilesets is no longer required.
 - **Mobile touch UI.** DPad + zoom DOM lives in `index.html` (`#level-touch`); `preview/main.js` wires `pointerdown/up` → shared `touchState` object that scene `update()` reads alongside `this.keys`. Don't add gesture libraries — buttons only. Empty state hides touch UI (game isn't running, controls are useless).
 - **Don't add features intended for cute_pet to "reuse"** — Phaser JS and Flame Dart aren't interoperable. Code reuse via copy-paste is a fantasy here.
 - **When user says "cute_pet engineer wrote demo entry":** propose `git rm -r preview/` + revert `index.html` to single sprite-preview entry + mark plan §14.7 as "removed" + flip `docs/cute_pet_integration.md` accordingly. Do NOT keep `preview/` "just in case."
