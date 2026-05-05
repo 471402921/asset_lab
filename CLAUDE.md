@@ -93,3 +93,5 @@ Already registered at user scope (`claude mcp add pixellab ...` writes to `~/.cl
 ## Cute_pet integration
 
 [docs/cute_pet_integration.md](docs/cute_pet_integration.md) is the **contract** for the downstream Flutter project. asset-lab schema/path/Tiled-convention changes go there first. cute_pet engineers read it as their source of truth. Don't put cute_pet-specific Dart code in this repo.
+
+⚠️ **Current status: DRAFT.** Schema is still iterating; do NOT tell the user "send it to cute_pet team yet." The doc itself has a banner with explicit readiness gates — when all gates green, asset-lab proactively notifies and the banner is removed. Until then, the doc is a working draft, useful for asset-lab's own decision tracking but not yet a stable contract.

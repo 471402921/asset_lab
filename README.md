@@ -7,7 +7,7 @@
 
 关卡编辑由 [Tiled](https://www.mapeditor.org/) 负责;cute_pet 用 `flame_tiled` 直接消费。asset-lab 是中间桥,**不重造 Tiled 轮子,也不替 cute_pet 写 Dart**。
 
-详细决策见 [asset-lab-plan.md](asset-lab-plan.md)。给 cute_pet 工程师的契约见 [docs/cute_pet_integration.md](docs/cute_pet_integration.md)。
+详细决策见 [asset-lab-plan.md](asset-lab-plan.md)。给 cute_pet 工程师的契约见 [docs/cute_pet_integration.md](docs/cute_pet_integration.md)(⚠️ 当前 DRAFT,等 readiness gates 全绿再发给 cute_pet 工程师)。
 
 ---
 

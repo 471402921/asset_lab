@@ -1,10 +1,30 @@
 # cute_pet 集成说明 (asset-lab → cute_pet 契约)
 
-> **本文是 asset-lab 维护的契约文档**,定义 cute_pet (Flutter+Flame+GetX) 该如何消费 asset-lab 产出的资源。
+> ⚠️ **状态: DRAFT — 暂不适合发给 cute_pet 工程师执行**
 >
-> **改动 cute_pet 仓代码不在 asset-lab 范围内**;本文只出 spec,实际 Dart 代码改动由 cute_pet 工程师按本文落地。
+> asset-lab 的 schema 仍在迭代,本文记录当前快照,但**不要据此开始改 cute_pet 仓代码**。等下面 readiness gates 全绿后,asset-lab 这边会主动通知,届时本横幅删除,本文转为正式契约。
 >
-> 状态: **可执行**,但 cute_pet 端尚未开始改造。新工程师看完本文 + 装好 Flame/flame_tiled 即可开工。
+> ## Readiness gates(都过才发布)
+>
+> - [ ] Wang tileset `.tsx` 生成跑通(Tiled 里能切到 tile 模式编辑,而非只 image layer overlay)
+> - [ ] 至少一次 furniture 完整流程验证: 设计师在 Tiled 里摆家具 + per-tile collision → cute_pet 端能识别
+> - [ ] 至少 2-3 张真实 pixellab 地图过 converter,确认 schema 没漏字段
+> - [ ] sprite NPC 在 Tiled 关卡里摆位流程跑通(`--sprites` 生成的 .tsx 真用一次)
+> - [ ] `terrain-info.json` 字段够用 — 或确认了"哪些字段是 reference-only,哪些是 cute_pet 真要消费的"
+> - [ ] Tiled object layer 命名(`walls` / `furniture`)经过真使用,不再变
+> - [ ] audio / effects 章节(§1, §3.x)由真资源验证过格式,不是脑补
+>
+> **当前 known-unstable 区**:
+> - 资源路径表里的 furniture / items / ui / audio 部分(§1)
+> - flame_tiled Dart 示例的 furniture 处理(§3.1)
+> - terrain-info.json 的字段集合(§4)
+> - cute_pet 改动清单(§6)的具体顺序和粒度
+>
+> 当前 known-stable 区:
+> - asset-lab → Tiled 的转换架构(parsers / IR / writers 分层)
+> - .tmx 里 image layer + `walls` object layer 的基本结构
+> - sprite 目录结构(`assets/sprites/{name}/{rotations,metadata.json}`)
+> - 资源更新流程的高层闭环(§5)
 
 ---
 
