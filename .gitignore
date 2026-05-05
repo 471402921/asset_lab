@@ -9,7 +9,9 @@ tmp/
 temporary_asset/*
 !temporary_asset/.gitkeep
 
-.claude/
+.claude/*
+# But Skills should ship with the repo (designer pulls → gets /asset-check etc.)
+!.claude/skills/
 
 # TLS material for the deploy box (generated on remote, never tracked)
 cert.pem

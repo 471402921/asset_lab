@@ -102,7 +102,7 @@ python3 -m http.server 8000      # or `npx serve`, or VS Code Live Server
 python3 tools/pixellab_to_tiled.py --sprites
 ```
 
-There is no test suite, no lint, no CI. This is a debugging/conversion tool, not a product.
+There is no general test suite or CI. **Designer-facing lint** lives at [tools/lint/check_assets.py](tools/lint/check_assets.py), invoked via the `/asset-check` Skill ([.claude/skills/asset-check/SKILL.md](.claude/skills/asset-check/SKILL.md)) — catches filename spaces / typos, broken `.tmj`/`.tsx` paths, iCloud absolute path leaks, sprite metadata vs disk drift. Run it after any designer-side asset change before assuming preview will work.
 
 ## Deployment
 
@@ -130,6 +130,7 @@ Primary user is one designer using Claude Code in VS Code + Tiled (GUI level edi
 - **Adding per-anim FPS**: if designer wants different speeds per state (currently all 8 fps), add `frames.animations[state].fps` to metadata + read it in sprite_loader.js + apply in both sprite_preview RAF and Phaser anim. Don't pre-implement.
 - **Converter changes**: if a new pixellab field appears or a new Tiled convention is needed, that's a converter change. Stay in the parser/writer split; don't blob logic into the CLI orchestrator.
 - **Don't touch `temporary_asset/`** when restructuring directories — that's the designer's drop zone.
+- **When designer reports "preview broken" / "新资源加载不出来" / "刚导出了 .tmj"**: trigger the `/asset-check` Skill *first*, before guessing what's wrong. Catches 90% of designer-side breakage (path issues, iCloud leaks, metadata drift, filename typos) in seconds. Don't manually grep around unless the lint comes back clean.
 - **If the request is "edit a level in the browser"**, redirect to "open .tmj in Tiled" instead. Don't reintroduce a level _editor_ in asset-lab. (Runtime "walking around" is what `preview/` already provides — that's a separate thing and stays.)
 - **If the request is "convert this pixellab Map Editor export"**, redirect to "let designer rebuild in Tiled directly". Don't reintroduce map converter.
 
