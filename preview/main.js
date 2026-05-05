@@ -526,13 +526,10 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
       this.player.facing = 'south';
       this.player.setCollideWorldBounds(true);
       this.player.setDepth(10);     // 玩家始终在 tile / object 之上, 避免走进家具时被盖住
-      const bodyW = Math.min(this.player.width, 32);
-      const bodyH = Math.min(this.player.height, 32);
-      this.player.body.setSize(bodyW, bodyH);
-      this.player.body.setOffset(
-        (this.player.width - bodyW) / 2,
-        (this.player.height - bodyH) / 2
-      );
+      // body 跟 sprite display 同尺寸: 让"看起来撞上 = 真撞上",避免视觉穿模 14px
+      // (如果以后特定角色需要更小的脚印 footprint,在这里按 sprite name 单独配置)
+      this.player.body.setSize(this.player.displayWidth, this.player.displayHeight);
+      this.player.body.setOffset(0, 0);
 
       // 5. Phaser anims (一段 frames.animations[state][dir] → 一个 anim key)
       this.animsByDir = {};
