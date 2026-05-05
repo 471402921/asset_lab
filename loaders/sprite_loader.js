@@ -30,13 +30,24 @@ export async function loadSprite(spritePath) {
     })
   );
 
-  // animations 当前 pixellab 导出为空; 首次拿到非空样本时按 plan §13 实装
-  const animations = {};
-  if (Object.keys(meta.frames.animations ?? {}).length > 0) {
-    console.warn(
-      '[sprite_loader] frames.animations 非空, 但 loader 尚未实装。请按 plan §13 更新格式约定后再扩。'
-    );
-  }
+  // animations: { state_key: { direction: [Image, Image, ...] } }
+  // Schema 见 plan §13.1。state_key 是设计师源头命名 (opaque ID),
+  // direction 可独立缺失 — 消费侧用 fallback chain (exact → south → 静帧)。
+  const rawAnims = meta.frames?.animations ?? {};
+  const stateEntries = await Promise.all(
+    Object.entries(rawAnims).map(async ([stateKey, dirMap]) => {
+      const dirEntries = await Promise.all(
+        Object.entries(dirMap).map(async ([dir, framePaths]) => {
+          const frames = await Promise.all(
+            framePaths.map((p) => loadImage(`${spritePath}/${p}`))
+          );
+          return [dir, frames];
+        })
+      );
+      return [stateKey, Object.fromEntries(dirEntries)];
+    })
+  );
+  const animations = Object.fromEntries(stateEntries);
 
   return { character: meta.character, rotations, animations };
 }

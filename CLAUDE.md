@@ -8,14 +8,15 @@ Working MVP. Three pieces (long-term scope):
 
 1. **GitHub-based asset file management** — `assets/` directory holds all resources, designer drops files in, git tracks history. asset-lab does no special processing on most of it.
 2. **pixellab sprite → Tiled `.tsx` converter** (Python, [tools/](tools/)) — turns pixellab character exports into Tiled `.tsx` (image collection, 8-direction tiles with `direction` property). **Sprite-only**; map/tilemap conversion was deleted on 2026-05-05.
-3. **Browser sprite preview** (vanilla JS) — sprite_preview reads pixellab character `metadata.json` + 8 directional PNGs, supports keyboard interaction (8 directions + zoom). State-switching slot is reserved in code+keymap but **not implemented** (awaiting pixellab state export schema).
+3. **Browser sprite preview** (vanilla JS) — sprite_preview reads pixellab character `metadata.json` + 8 directional PNGs, supports keyboard interaction (8 directions + zoom + state/animation playback). State switching + animation playback **implemented 2026-05-05** when first sprite (`yellow_Shiba`) arrived with non-empty `frames.animations`. Schema + fallback rules in plan §13.1.
 
-Plus a **temporary scaffold**: **Browser level runtime preview** ([preview/](preview/), Phaser via CDN lazy-load). Lets the designer "walk around" a freshly-edited `.tmj` in the browser. **Will be removed** once cute_pet engineer ships `lib/demo/level_preview.dart`. Do NOT let `preview/` accrete business logic — it's a bridge, not a long-term home.
+Plus a **temporary scaffold**: **Browser level runtime preview** ([preview/](preview/), Phaser via CDN lazy-load). Lets the designer "walk around" a freshly-edited `.tmj` in the browser. Plays sprite walking animation when player moves (heuristic state_key lookup). **Will be removed** once cute_pet engineer ships `lib/demo/level_preview.dart`. Do NOT let `preview/` accrete business logic — it's a bridge, not a long-term home.
 
 [asset-lab-plan.md](asset-lab-plan.md) is the design doc + decision log; **read it before any non-trivial work**. Major scope shifts logged in its 修订记录:
 - 2026-05-05: dropped in-browser level preview (Tiled does this better)
 - 2026-05-05 (later same day): dropped pixellab Map Editor → .tmx converter (designer prefers Tiled directly; pixellab now only outputs basic PNG elements + sprites)
 - 2026-05-05 (later again): added `preview/` Phaser temporary scaffold for level runtime preview while cute_pet engineer waits for schema to stabilize
+- 2026-05-05 (4th revision): sprite animation + state switching landed (STATE SLOT placeholder → real impl) when first sprite arrived
 
 ## What this tool is (and is NOT)
 
@@ -39,7 +40,7 @@ These are load-bearing decisions, not preferences. From plan §9.
 - **pixellab `metadata.json` is upstream contract.** Never change field semantics. Hard-error on `export_version !== "2.0"`.
 - **Direction strings stay raw.** Use pixellab's literal `south`, `south-east`, `east`, ... in code. Do NOT translate to `N/E/S/W`.
 - **Pixel purity is P0.** `ctx.imageSmoothingEnabled = false` AND CSS `image-rendering: pixelated`. Zoom is integer-only (2/3/4/6/8, default 4). Reject non-integer zoom.
-- **STATE SLOT placeholder, no impl.** sprite_preview.js has a STATE SLOT block at top of file, with hooks in `_dispatch`/`constructor`/`keymap.js`. Do NOT implement state switching by guessing schema — wait for real pixellab state export samples and update plan §13/§14 schema first.
+- **STATE SLOT is implemented (2026-05-05).** When first real sprite arrived with non-empty `frames.animations`, the placeholder became real (Tab + Digit1-9 + Space + [/]). Same rule still applies for **future schema discoveries**: don't guess at unknown pixellab fields — wait for real samples and update plan §13/§14 first. Add new fallback rules to plan §13.1 (current rule: exact dir → south → static rotation; no mirror fallback).
 
 ### Converter side (Python in tools/)
 - **Layered architecture is load-bearing.** `tools/converters/` has three sections: `pixellab/` (parsers), `ir.py` (tool-agnostic intermediate representation), `tiled/` (writers). **Parsers must not import from writers, and vice versa.** Future migration (pixellab → some other tool, or Tiled → another engine target) only swaps one side. Verify with `grep -rn pixellab tools/converters/tiled/` (must be empty modulo docstrings).
@@ -69,10 +70,10 @@ These are load-bearing decisions, not preferences. From plan §9.
 
 ### Browser side
 - `core/` — `renderer.js` (pixel-purity + integer zoom), `input.js` (keymap-driven prompt panel), `version_guard.js` (export_version check).
-- `loaders/` — `sprite_loader.js`; `_image.js` (small shared `loadImage(src)` helper).
-- `modes/sprite_preview.js` — sprite-preview mode (vanilla JS Canvas). Has STATE SLOT block at top documenting how to wire up state switching when ready.
-- `preview/main.js` — level-preview mode (Phaser via CDN, **temporary scaffold**, see preview/README.md). Self-contained, doesn't reuse `core/`/`loaders/` deliberately.
-- `keymap.js` — only `SPRITE_KEYMAP`. Has STATE SLOT comment block showing where to add state-switch keybindings.
+- `loaders/` — `sprite_loader.js` (loads rotations + animations dict per plan §13.1); `_image.js` (small shared `loadImage(src)` helper).
+- `modes/sprite_preview.js` — sprite-preview mode (vanilla JS Canvas). RAF-driven animation playback with fallback chain (exact dir → south → static rotation).
+- `preview/main.js` — level-preview mode (Phaser via CDN, **temporary scaffold**, see preview/README.md). Self-contained, doesn't reuse `core/`/`loaders/` deliberately. Plays walking anim heuristically (state_key contains 'walk'); idle anim if state_key contains 'idle'/'stand'/'breath'.
+- `keymap.js` — `SPRITE_KEYMAP` (face / animation / state / zoom). Tab + Digit1-9 select state; Space toggles play; [/] step frame.
 - `index.html` — single entry, top button bar toggles between sprite preview and level preview. Persists choice via `?mode=...` query param. Lazy-imports `preview/main.js` only when level mode is selected.
 
 ### Converter side ([tools/](tools/))
@@ -103,7 +104,8 @@ There is no test suite, no lint, no CI. This is a debugging/conversion tool, not
 Primary user is one designer using Claude Code in VS Code + Tiled (GUI level editor) + pixellab (sprite + basic PNG generation).
 
 - **Sprite preview tweaks**: if designer wants "show animation FPS" or "switch sprite via Tab", that's vibe-code-able in `modes/sprite_preview.js` (~30-80 LOC at a time, per plan §9).
-- **State switching**: when she comes back with real pixellab state samples, follow the implementation steps in the STATE SLOT comment block at top of sprite_preview.js. Do NOT pre-implement.
+- **state_key naming**: designer renames at pixellab source to semantic names (`idle` / `walking` / `sleeping` / `lying` / `crouch` etc.). asset-lab does NOT maintain an alias map. Phaser `preview/main.js` finds walking/idle by substring heuristic — designer's semantic names will hit cleanly.
+- **Adding per-anim FPS**: if designer wants different speeds per state (currently all 8 fps), add `frames.animations[state].fps` to metadata + read it in sprite_loader.js + apply in both sprite_preview RAF and Phaser anim. Don't pre-implement.
 - **Converter changes**: if a new pixellab field appears or a new Tiled convention is needed, that's a converter change. Stay in the parser/writer split; don't blob logic into the CLI orchestrator.
 - **Don't touch `temporary_asset/`** when restructuring directories — that's the designer's drop zone.
 - **If the request is "preview a level in the browser"**, redirect to "open .tmx in Tiled" instead. Don't reintroduce level_preview.

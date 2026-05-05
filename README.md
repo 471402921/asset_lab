@@ -86,8 +86,12 @@ npx serve
 | Q / E / Z / C | NW / NE / SW / SE |
 | `+` / `-` | 整数倍缩放 (2 / 3 / 4 / 6 / 8) |
 | `0` | 缩放重置回 4× |
-| Space / `[` / `]` | 动画控制 (待 pixellab 动画样本到位再实装) |
-| Digit1-9 | 状态切换 (槽位预留, 待 pixellab 状态导出 schema 定型) |
+| Digit 1-9 | 切换状态/动画 (按 `frames.animations` 顺序; 选中后自动播放) |
+| Tab | 清状态, 回 8 方向静帧 |
+| Space | 播放 / 暂停当前动画 |
+| `[` / `]` | 单帧步进 (前 / 后, 自动暂停) |
+
+state_key 缺当前方向时自动 fallback 到 `south` 帧 (info 面板会标 `↳ south fallback`)。
 
 #### Level preview 键盘 (临时拐杖)
 
@@ -95,9 +99,11 @@ npx serve
 
 | 键 | 作用 |
 |---|---|
-| W / D / S / A | 玩家上 / 右 / 下 / 左移动 |
+| W / D / S / A | 玩家上 / 右 / 下 / 左移动 (移动时自动播 walking 动画) |
 | Q / E / Z / C | NW / NE / SW / SE 斜向移动 |
 | X | 相机 zoom 切换 (远景 2× ↔ 近景 4×, 都跟随玩家) |
+
+走路动画按 sprite `frames.animations` 里启发式找含 `walk` 的 state_key (设计师源头 semantic 命名后命中)。该方向缺 → south fallback → 静帧。停止时若 sprite 有 `idle`/`stand`/`breath` 段则播放,否则静帧。
 
 需要 `assets/maps/level_001.tmj` + `assets/sprites/husky_chibi/` 才能跑;缺资源给友好空态。Phaser 是 lazy load (CDN),切到 level mode 第一次加载需 ~1-2 秒。详细约束见 [preview/README.md](preview/README.md)。
 

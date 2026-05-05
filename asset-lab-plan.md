@@ -8,6 +8,14 @@
 
 ## 修订记录
 
+- **2026-05-05 (4th revision today) sprite 动画 + 状态切换实装 (STATE SLOT 落地)**: 设计师交付第一只完整 sprite (`yellow_Shiba`), `frames.animations` 不再是空 — 含 5 段动画 (idle / walking / sleeping / lying / crouch),且**跨方向不齐全** (walking 有 south/east/west, 其他只有 south)。原 STATE SLOT placeholder 触发实装:
+  - **schema 真相** 写进 §13.1: `frames.animations[state_key][direction] = [frame paths]`,direction 可独立缺失
+  - **fallback chain**: 请求 (state, direction) → 命中? → 否则 south 帧 → 否则 rotations 静帧。**不做镜像 fallback** (没 east 不 flip west)
+  - **state_key 命名**: 设计师源头 semantic 命名 (`idle` / `walking` 等), asset-lab 把它当 opaque ID 用,**不维护 alias 表**
+  - **键位**: `Tab` 清状态 (回静帧), `Digit1..Digit9` 按 `Object.keys(animations)` 顺序选, `Space` 播放/暂停, `[` / `]` 单帧步进
+  - **FPS**: 默认 8 fps,所有动画统一速率;真要分动画微调,后续在 metadata 加 `frames.animations[state].fps`
+  - **Phaser preview**: walking 段在 level preview 里也接 — 玩家移动时按方向播 walking 帧,缺方向回静帧;停止 → idle (若有) 或静帧
+  - 文档同步: README 键盘表去掉"待实装"标记;CLAUDE.md STATE SLOT 段改为"已实装";docs/cute_pet_integration.md 加 animation schema + 翻 readiness gate
 - **2026-05-05 (third revision today) 加 Phaser 关卡运行时预览 (临时拐杖)**: 设计师真痛点是 "改完 .tmj 想立刻跑起来玩, cute_pet 业务太重启动慢"。同时 cute_pet 工程师**有意识等 schema 稳定**才把 Tiled 工作流集成进主项目。折中: asset-lab 加 `preview/` 目录, 用 Phaser (CDN lazy-load) 跑最小关卡运行时:
   - 加载 `.tmj` (Tiled JSON, **设计师导出时勾选 Embed Tilesets**)
   - 玩家 8 方向 (WASD + QEZC) 走, 撞 walls object layer + 撞家具 (Arcade Physics 矩形)
@@ -512,22 +520,19 @@ pixellab MCP 主要工具(完整列表见 [pixellab MCP docs](https://api.pixell
 
 ## 13. 附录: 完整 metadata.json 样本(pixellab 真实导出)
 
-来自设计师手上的 husky chibi 角色(`export_version: 2.0`):
+来自设计师手上的 yellow_Shiba 角色(2026-05-05 第一只完整 sprite 到位,`export_version: 2.0`,含 5 段动画):
 
 ```json
 {
   "character": {
-    "id": "3d7a1c84-484e-4257-85ad-0ef93069cf50",
-    "name": "husky, chibi 3-head-body ratio, chubby baby proportions, big...",
-    "prompt": "husky, chibi 3-head-body ratio, chubby baby proportions, b...",
-    "size": {
-      "width": 60,
-      "height": 60
-    },
+    "id": "999a2a13-3b99-4f51-8c39-af06204b03fa",
+    "name": "yellow Shiba",
+    "prompt": "yellow shibainu, chibi 3-head-body ratio, chubby baby proportions, big round head, ...",
+    "size": { "width": 60, "height": 60 },
     "template_id": "mannequin",
     "directions": 8,
     "view": "low top-down",
-    "created_at": "2026-05-03T05:15:03.192982+00:00"
+    "created_at": "2026-05-03T04:48:19.677874+00:00"
   },
   "frames": {
     "rotations": {
@@ -540,36 +545,72 @@ pixellab MCP 主要工具(完整列表见 [pixellab MCP docs](https://api.pixell
       "west": "rotations/west.png",
       "south-west": "rotations/south-west.png"
     },
-    "animations": {}
+    "animations": {
+      "<state_key>": {
+        "<direction>": [
+          "animations/<state_key>/<direction>/frame_000.png",
+          "animations/<state_key>/<direction>/frame_001.png",
+          "..."
+        ]
+      }
+    }
   },
   "export_version": "2.0",
-  "export_date": "2026-05-04T00:58:21.135030"
+  "export_date": "2026-05-05T06:47:36.472701"
 }
 ```
 
-**对应文件结构**:
+**对应文件结构** (yellow_Shiba 真样本):
 
 ```
-assets/sprites/husky_chibi/
+assets/sprites/yellow_Shiba/
 ├── metadata.json
-└── rotations/
-    ├── south.png       # 60×60 px 单帧
-    ├── south-east.png
-    ├── east.png
-    ├── north-east.png
-    ├── north.png
-    ├── north-west.png
-    ├── west.png
-    └── south-west.png
+├── rotations/                       # 8 方向静帧 (永远齐全)
+│   ├── south.png 等 8 张 60×60
+├── animations/                      # 5 个动画 (设计师源头命名, asset-lab 不映射)
+│   ├── <state_key_1>/<direction>/frame_NNN.png
+│   └── ...
+└── yellow_Shiba.tsx                 # asset-lab converter 产 (Tiled image collection)
 ```
 
 **字段使用提示**:
-- `character.size` → Canvas 渲染尺寸(原始 60×60,4× 缩放后绘 240×240)
+- `character.size` → Canvas 渲染尺寸(60×60,4× 缩放绘 240×240)
 - `character.directions` → 验证用(应等于 frames.rotations 的 key 数)
-- `character.view` → 暂未使用,但建议在 UI 角落显示(`low top-down` 提示设计师该角色透视类型)
-- `frames.rotations[key]` → 相对 metadata.json 的路径,直接 `<img src>` 加载
-- `frames.animations` → 当前为空。**首次拿到非空样本时**(设计师做了走路动画后),立即更新 §3.1 和本附录,标注真实结构(目前推测 `animations/{name}/{frame_idx}.png` 或 `animations/{name}.png`)
-- `export_version` → 启动时检查;`"2.0"` 通过,其它报错 `Unknown pixellab export_version: X. asset-lab 仅支持 2.0,请升级 loader`
+- `character.view` → 在 UI 角落显示(`low top-down` 等)
+- `frames.rotations[key]` → 相对 metadata.json 的路径,`<img src>` 加载
+- `frames.animations[state_key][direction]` → frame PNG 路径数组,**任意一段都可能缺方向**(yellow_Shiba 实测: walking 有 west/east/south, idle/sleep/lie/crouch 都只有 south)
+- `export_version` → 启动时检查;仅支持 `"2.0"`
+
+### 13.1 frames.animations 详细 schema (2026-05-05 第一只 sprite 实测)
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `frames.animations[state_key]` | `dict[direction, list[path]]` | `state_key` 是设计师在 pixellab 命名,asset-lab 把它当 opaque ID 用,**不维护 alias 表**;**约定**: 设计师起 semantic name(`idle` / `walking` / `sleeping` 等),不要用 prompt-derived 长串 |
+| `direction` | `str` | pixellab 8 方向之一(literal 字符串,不翻译) |
+| frame path | `str` | 相对 metadata.json 的 PNG 路径,`animations/{state_key}/{direction}/frame_NNN.png` 是 pixellab 默认布局,但 loader 不假设,直接用 metadata 给的路径 |
+
+**direction 覆盖规则**: 同一动画下不同方向**可独立缺失**。yellow_Shiba 实测:
+
+| 动画 | 方向覆盖 | 帧数 |
+|---|---|---|
+| 走 (walking) | south / east / west(3 个) | 9 帧 |
+| 待机 (idle/breathing) | south(1 个) | 9 帧 |
+| 哈欠 (sleepy yawn) | south(1 个) | 17 帧 |
+| 躺 (lying) | south(1 个) | 8 帧 |
+| 蹲 (crouch) | south(1 个) | 9 帧 |
+
+**消费侧 fallback chain** (asset-lab `modes/sprite_preview.js` + `preview/main.js` + cute_pet 都按此实装):
+
+```
+请求 (state, direction)
+  ├─ 命中 frames.animations[state][direction] → 用之
+  ├─ 否则 frames.animations[state]['south'] → 用 south 帧 (fallback marker 上 UI)
+  └─ 否则 frames.rotations[direction] → 静帧 (彻底没动画时)
+```
+
+**不做镜像 fallback**(没 east 不会去 flip west)。补方向是设计师在 pixellab 那边的事,asset-lab 不替它推演。
+
+**FPS**: pixellab 不导 FPS。asset-lab 默认 `8 fps` (`keymap.js` `ANIMATION_DEFAULT_FPS`),所有动画统一速率;真要分动画微调,后续在 metadata 加 `frames.animations[state].fps` 字段(待设计师反馈)。
 
 ---
 
@@ -631,19 +672,21 @@ asset_lab/
 
 asset-lab 不强制 .tmj 的 layer 命名,但 `preview/` 临时拐杖**约定** `walls` 名字 (cute_pet 工程师后续接手时也按这个约定省事)。cute_pet 端约定见 `docs/cute_pet_integration.md`(DRAFT,等设计师约定稳定后同步)。
 
-### 14.5 STATE SLOT(未实装)
+### 14.5 sprite 状态切换 + 动画播放(2026-05-05 实装)
 
-设计师未来希望在 web 端模拟 sprite 的所有状态(宠物状态多: 健康/受伤/睡觉/开心 等)。等 pixellab 状态导出 schema 定型后再实装。代码槽位已预留在:
+> ✅ 已实装。原 STATE SLOT 槽位由 yellow_Shiba(第一只完整 sprite)触发实装。schema 见 §13.1。
 
-- `modes/sprite_preview.js` 顶部 STATE SLOT 注释块 + `this.state` 字段 + `_dispatch` 'state' 分支(目前 warn)
-- `keymap.js` STATE SLOT 注释段(取消注释 + 加具体绑定)
-- `loaders/sprite_loader.js`(等 metadata 出 states 字段时挂出来)
+**前提变化**:`frames.animations` 当年(plan §13 写时)假设是空,实际 yellow_Shiba 给出 5 段动画 + 跨方向不齐全。STATE SLOT 不再是 placeholder,变成真实组件:
 
-实装步骤(等触发):
-1. 拿到 pixellab 真实状态导出样本,更新本节 + §13 schema 章节
-2. sprite_loader.js 加 states 解析
-3. keymap.js 真添加状态切换键(Digit1..Digit9 之类)
-4. sprite_preview.js `_dispatch` 实装 'state',`_render` 按 state 选 frame,`_showInfo` 显示 state
+- `loaders/sprite_loader.js` — 读 `frames.animations`,装成 `{state_key: {direction: [Image, ...]}}`
+- `keymap.js` — `Tab` 清状态(回静帧),`Digit1..Digit9` 按 `Object.keys(animations)` 顺序选状态;`Space` 播放/暂停,`[` / `]` 单帧步进
+- `modes/sprite_preview.js` — RAF 驱动 frame index,按 §13.1 fallback chain 选 frame,info 面板显示 state / frame / fallback 标记
+- `preview/main.js` — Phaser Tilemap 玩家移动时播 walking 动画(若该方向缺,回静帧;Phaser anim key 结构 `walk_{direction}`),停止时回 idle 段(若有)或静帧
+
+**留给将来的事**:
+- 设计师如要 per-animation FPS,在 metadata 加 `frames.animations[state].fps`,loader 接(目前默认 8 fps)
+- 镜像 fallback(没 east 自动 flip west)— **不做**,留给设计师补帧
+- 状态机(idle ↔ walking 自动过渡)— **不做**,这是 cute_pet 业务范畴
 
 ### 14.6 不做的事(2026-05-05 后新增)
 
@@ -692,7 +735,7 @@ asset-lab 不强制 .tmj 的 layer 命名,但 `preview/` 临时拐杖**约定** 
 ❌ 不做(关键):
 - 业务逻辑 / 状态机 / 任务 / 对话 / 背包 / NPC AI
 - sprite 状态切换 (沿用 sprite_preview 的 STATE SLOT 策略)
-- sprite 走路动画播放 (frames.animations 当前为空)
+- ~~sprite 走路动画播放 (frames.animations 当前为空)~~ → **2026-05-05 第一只 sprite 到位后实装**: walking 段在 Phaser 里按 §13.1 fallback chain 播帧, 见 §14.5
 - 多关卡切换 UI (?map=xxx.tmj 是逃生口)
 - NPC sprite 渲染
 - 触发器 / 场景跳转

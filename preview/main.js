@@ -9,24 +9,33 @@
  *   - 玩家 8 方向移动 (WASD + QEZC, Arcade Physics 矩形碰撞)
  *   - 撞 walls object layer + 撞家具 (per-tile collision via Tiled)
  *   - 相机两档 zoom (远景 2× / 近景 4×, 按 X 切换), 跟随玩家
+ *   - 玩家移动时播 walking 动画 (按 plan §13.1 fallback chain), 停止时播 idle 段
+ *     (启发式按 state_key 名字找 walk/idle, 设计师 semantic 命名后命中)
  *   - 缺资源 → 友好空态, 不启动 Phaser
  *
  * 不做:
  *   - 业务逻辑 / 状态机 / 任务 / 对话 / 背包 / NPC AI
- *   - sprite 状态切换 (沿用 sprite_preview 的 STATE SLOT 策略)
+ *   - 主动状态切换 UI (玩家不能在 level preview 里手动切 idle / sleep / lying;
+ *     这些都在 sprite_preview 里逐个看, 留给 cute_pet 真接业务时再 wire)
  *   - 多关卡切换 UI (?map=xxx.tmj 是逃生口)
  *   - 音频 (Phaser audio 留给真用时再加)
  */
 
 const PHASER_CDN = 'https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js';
 const DEFAULT_MAP = 'assets/maps/level_001.tmj';
-const DEFAULT_SPRITE_DIR = 'assets/sprites/husky_chibi';
+const DEFAULT_SPRITE_DIR = 'assets/sprites/yellow_Shiba';
 
 // 远景 (整张地图视野) / 近景 (玩家周围细节)
 const ZOOM_LEVELS = [2, 4];
 const DEFAULT_ZOOM_INDEX = 0;
 
 const PLAYER_SPEED = 120;   // px/s
+const ANIMATION_FPS = 8;
+
+// 动画 state_key 启发式 (设计师源头命名应是 semantic, 如 "walking" / "idle")。
+// 如果 yellow_Shiba 第一只样本的长 prompt-derived key 还在, 仍能命中 (含 'walk')。
+const WALKING_NAME_HINTS = ['walk'];
+const IDLE_NAME_HINTS = ['idle', 'stand', 'breath', 'rest'];
 
 // 8 方向移动键 -> [vx, vy] 单位向量 (斜向归一化)
 const D = Math.SQRT1_2;
@@ -193,6 +202,24 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate }) {
       for (const [dir, relPath] of Object.entries(spriteMeta.frames.rotations)) {
         this.load.image(`player_${dir}`, `${spriteDir}/${relPath}`);
       }
+      // animations: 每个 state_key × 每个 direction × 每帧, 全 preload
+      // (实测 yellow_Shiba 5 anim 总计 ~70 张 60×60 PNG, 不大)
+      const anims = spriteMeta.frames?.animations ?? {};
+      for (const [stateKey, dirMap] of Object.entries(anims)) {
+        for (const [dir, framePaths] of Object.entries(dirMap)) {
+          framePaths.forEach((p, i) => {
+            this.load.image(this._animFrameKey(stateKey, dir, i), `${spriteDir}/${p}`);
+          });
+        }
+      }
+    }
+
+    _animFrameKey(stateKey, dir, frameIdx) {
+      return `anim:${stateKey}:${dir}:${frameIdx}`;
+    }
+
+    _animKey(stateKey, dir) {
+      return `play:${stateKey}:${dir}`;
     }
 
     create() {
@@ -275,6 +302,30 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate }) {
         (this.player.height - bodyH) / 2
       );
 
+      // 注册 Phaser anims (一段 frames.animations[state][dir] → 一个 anim key)
+      // + 启发式找 walking / idle 的 state_key
+      this.animsByDir = {};   // { stateKey: { direction: animKey } }
+      const anims = spriteMeta.frames?.animations ?? {};
+      for (const [stateKey, dirMap] of Object.entries(anims)) {
+        this.animsByDir[stateKey] = {};
+        for (const [dir, framePaths] of Object.entries(dirMap)) {
+          const animKey = this._animKey(stateKey, dir);
+          this.anims.create({
+            key: animKey,
+            frames: framePaths.map((_, i) => ({ key: this._animFrameKey(stateKey, dir, i) })),
+            frameRate: ANIMATION_FPS,
+            repeat: -1,
+          });
+          this.animsByDir[stateKey][dir] = animKey;
+        }
+      }
+      const stateKeys = Object.keys(anims);
+      const findKey = (hints) =>
+        stateKeys.find((k) => hints.some((h) => k.toLowerCase().includes(h))) ?? null;
+      this.walkingKey = findKey(WALKING_NAME_HINTS);
+      this.idleKey = findKey(IDLE_NAME_HINTS);
+      this.currentAnimKey = null;
+
       // Walls / collision: 尝试找 'walls' object layer 并加 static body
       const wallsLayer = objLayers.find((ol) => ol.name === 'walls');
       if (wallsLayer) {
@@ -336,20 +387,58 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate }) {
       }
       this.player.setVelocity(vx * PLAYER_SPEED, vy * PLAYER_SPEED);
 
-      if (pressedDir && pressedDir !== this.player.facing) {
+      const facingChanged = pressedDir && pressedDir !== this.player.facing;
+      if (facingChanged) {
         this.player.facing = pressedDir;
-        this.player.setTexture(`player_${pressedDir}`);
+      }
+
+      // 决策播啥动画 (fallback chain: 见 plan §13.1)
+      const isMoving = vx !== 0 || vy !== 0;
+      const desiredAnimKey = this._pickAnimKey(isMoving);
+
+      if (desiredAnimKey) {
+        if (this.currentAnimKey !== desiredAnimKey) {
+          this.player.play(desiredAnimKey, true);
+          this.currentAnimKey = desiredAnimKey;
+        }
+      } else {
+        // 没动画可播 → 静帧 (按 facing 选 rotation)
+        if (this.currentAnimKey) {
+          this.player.stop();
+          this.currentAnimKey = null;
+        }
+        this.player.setTexture(`player_${this.player.facing}`);
+      }
+
+      if (facingChanged || (isMoving && !desiredAnimKey)) {
         this._updateInfo();
       }
+    }
+
+    // 返回应播的 anim key, 或 null (静帧 fallback)。
+    _pickAnimKey(isMoving) {
+      const dir = this.player.facing;
+      const tryState = (stateKey) => {
+        if (!stateKey) return null;
+        const dirMap = this.animsByDir[stateKey];
+        if (!dirMap) return null;
+        return dirMap[dir] ?? dirMap.south ?? null;
+      };
+      if (isMoving) return tryState(this.walkingKey);   // 走 → 走路 anim, 缺方向回 south
+      return tryState(this.idleKey);                     // 停 → idle anim (若有, 通常只 south)
     }
 
     _updateInfo() {
       if (!this.player || !onInfoUpdate) return;
       const z = ZOOM_LEVELS[this.zoomIndex];
       const zoomLabel = this.zoomIndex === 0 ? '远景' : '近景';
+      const animLine = this.currentAnimKey
+        ? `anim: <b>${this.currentAnimKey.replace('play:', '')}</b>`
+        : 'anim: <i>(static)</i>';
       onInfoUpdate(
         `<div><b>level:</b> ${mapPath}</div>` +
-          `<div>player: ${spriteDir} · facing: ${this.player.facing} · zoom: ${z}× (${zoomLabel}, X 切换)</div>`
+          `<div>player: ${spriteDir} · facing: ${this.player.facing} · zoom: ${z}× (${zoomLabel}, X 切换)</div>` +
+          `<div>${animLine}</div>`
       );
     }
   };

@@ -1,32 +1,18 @@
 import { Renderer } from '../core/renderer.js';
 import { InputManager } from '../core/input.js';
 import { loadSprite } from '../loaders/sprite_loader.js';
-import { SPRITE_KEYMAP } from '../keymap.js';
+import { SPRITE_KEYMAP, ANIMATION_DEFAULT_FPS } from '../keymap.js';
 
-const DEFAULT_SPRITE = 'assets/sprites/husky_chibi';
+const DEFAULT_SPRITE = 'assets/sprites/yellow_Shiba';
 
-/* ────────────────────────────────────────────────────────────────────────────
- * STATE SLOT (未实装, 等设计师 + pixellab 状态导出格式定型)
- *
- * 设计师未来希望在 web 端模拟 sprite 的所有状态(宠物状态多: 健康/受伤/睡觉
- * /开心 等等)。当前不实装是因为:
- *   1. pixellab character export 的状态字段尚未确定 (frames.animations
- *      为空, 状态字段在 metadata.json 里也不存在)
- *   2. 实装前需要看真实样本, 避免按猜测的 schema 写一遍又重写
- *
- * 接入点已预留:
- *   - this.state (constructor 里 null)
- *   - _dispatch 'state' action 分支 (现在 throw, 提示未实装)
- *   - keymap.js 里 STATE_KEYS 注释段, 等真要做时取消注释 + 改成具体绑定
- *   - this.sprite.states 字段 (sprite_loader 一旦读到 metadata.states
- *     或 frames.animations, 在这里挂出来即可)
- *
- * 实装步骤(等触发):
- *   1. 拿到 pixellab 真实状态导出样本, 更新 plan §13 / §14 schema 章节
- *   2. sprite_loader.js 加 states 解析
- *   3. keymap.js 真添加状态切换键
- *   4. 这里 _dispatch 实装 'state', _render 按 state 选 frame, _showInfo 显示
- * ──────────────────────────────────────────────────────────────────────────── */
+const FRAME_INTERVAL_MS = 1000 / ANIMATION_DEFAULT_FPS;
+
+// state_key 是设计师源头命名 (semantic, 例如 "idle"/"walking");
+// 旧 prompt-derived 长串 fallback 截 25 字 + "..."
+function shortStateLabel(key) {
+  if (!key) return '(static)';
+  return key.length > 25 ? `${key.slice(0, 25)}…` : key;
+}
 
 export class SpritePreviewMode {
   constructor({ canvas, promptElement, infoElement, emptyStateElement }) {
@@ -36,7 +22,14 @@ export class SpritePreviewMode {
     this.emptyStateElement = emptyStateElement;
     this.sprite = null;
     this.facing = 'south';
-    this.state = null;  // STATE SLOT: future "idle" / "walking" / "hurt" / etc.
+
+    // animation playback state
+    this.stateKey = null;        // null = static rotations
+    this.stateKeys = [];         // ordered list of available state keys
+    this.frameIndex = 0;
+    this.playing = false;
+    this._raf = null;
+    this._lastTickTime = 0;
   }
 
   async start() {
@@ -44,6 +37,7 @@ export class SpritePreviewMode {
     this.input.setKeymap(SPRITE_KEYMAP, (b) => this._dispatch(b));
     try {
       this.sprite = await loadSprite(DEFAULT_SPRITE);
+      this.stateKeys = Object.keys(this.sprite.animations);
       this._hideEmpty();
       this._showInfo();
       this._render();
@@ -54,6 +48,7 @@ export class SpritePreviewMode {
   }
 
   stop() {
+    this._stopRAF();
     this.input.stop();
     this._hideEmpty();
     if (this.infoElement) this.infoElement.innerHTML = '';
@@ -74,27 +69,123 @@ export class SpritePreviewMode {
       this._render();
       this._showInfo();
     } else if (action === 'state') {
-      // STATE SLOT: 等 pixellab 状态导出 schema 定型后实装
-      console.warn(
-        '[sprite_preview] state switching not implemented yet. ' +
-          'Awaiting pixellab state export schema. See top-of-file STATE SLOT block.'
-      );
+      this._handleState(value);
+    } else if (action === 'animation') {
+      this._handleAnimation(value);
     }
-    // animation: MVP 静帧, 暂未实装 (plan §13)
+  }
+
+  _handleState(value) {
+    if (value === 'clear') {
+      this.stateKey = null;
+      this.frameIndex = 0;
+      this._stopRAF();
+      this.playing = false;
+    } else if (value.startsWith('index:')) {
+      const idx = parseInt(value.slice(6), 10);
+      if (idx < 0 || idx >= this.stateKeys.length) return;  // 没那么多 state, 忽略
+      this.stateKey = this.stateKeys[idx];
+      this.frameIndex = 0;
+      // 选状态自动开播 (一步到位的体验)
+      this.playing = true;
+      this._startRAF();
+    }
+    this._render();
+    this._showInfo();
+  }
+
+  _handleAnimation(value) {
+    if (value === 'toggle_play') {
+      if (!this.stateKey) return;
+      this.playing = !this.playing;
+      if (this.playing) this._startRAF();
+      else this._stopRAF();
+      this._showInfo();
+    } else if (value === 'next' || value === 'prev') {
+      if (!this.stateKey) return;
+      // 单步默认暂停, 让设计师看清每一帧
+      if (this.playing) {
+        this.playing = false;
+        this._stopRAF();
+      }
+      this._stepFrame(value === 'next' ? +1 : -1);
+      this._showInfo();
+    }
+  }
+
+  _stepFrame(delta) {
+    const cur = this._currentFrames();
+    if (!cur || cur.frames.length === 0) return;
+    this.frameIndex = (this.frameIndex + delta + cur.frames.length) % cur.frames.length;
+    this._render();
+  }
+
+  // Fallback chain (plan §13.1):
+  //   exact (state, facing) → (state, 'south') → null (静帧 fallback 在 _render)
+  // 返回 { frames, fallback } 或 null
+  _currentFrames() {
+    if (!this.stateKey) return null;
+    const dirMap = this.sprite.animations[this.stateKey];
+    if (!dirMap) return null;
+    if (dirMap[this.facing]) return { frames: dirMap[this.facing], fallback: null };
+    if (dirMap.south) return { frames: dirMap.south, fallback: 'south' };
+    return null;
   }
 
   _render() {
     this.renderer.clear();
-    const img = this.sprite.rotations[this.facing];
+    const cur = this._currentFrames();
+    let img;
+    if (cur && cur.frames[this.frameIndex]) {
+      img = cur.frames[this.frameIndex];
+    } else {
+      img = this.sprite.rotations[this.facing];
+    }
     this.renderer.drawCenteredEntity(img);
+  }
+
+  _startRAF() {
+    if (this._raf) return;
+    this._lastTickTime = performance.now();
+    const tick = (t) => {
+      if (!this.playing) {
+        this._raf = null;
+        return;
+      }
+      if (t - this._lastTickTime >= FRAME_INTERVAL_MS) {
+        this._stepFrame(+1);
+        this._showInfo();
+        this._lastTickTime = t;
+      }
+      this._raf = requestAnimationFrame(tick);
+    };
+    this._raf = requestAnimationFrame(tick);
+  }
+
+  _stopRAF() {
+    if (this._raf) {
+      cancelAnimationFrame(this._raf);
+      this._raf = null;
+    }
   }
 
   _showInfo() {
     const c = this.sprite.character;
-    const stateLabel = this.state ? ` · state: ${this.state}` : '';
+    const cur = this._currentFrames();
+    let stateLine;
+    if (!this.stateKey) {
+      stateLine = `state: <i>(static)</i> · 5 anims, Tab→静帧, Digit1-${Math.min(9, this.stateKeys.length)}→选`;
+    } else {
+      const total = cur ? cur.frames.length : 0;
+      const playMark = this.playing ? '▶' : '⏸';
+      const fallbackMark = cur?.fallback ? ` · <span style="color:#f0c674">↳ ${cur.fallback} fallback</span>` : '';
+      const noFramesMark = !cur ? ' · <span style="color:#e07070">no frames (静帧)</span>' : '';
+      stateLine = `state: <b>${shortStateLabel(this.stateKey)}</b> · ${playMark} frame ${this.frameIndex + 1}/${total}${fallbackMark}${noFramesMark}`;
+    }
     this.infoElement.innerHTML = `
       <div><b>${c.name}</b></div>
-      <div>size: ${c.size.width}×${c.size.height} · view: ${c.view} · zoom: ${this.renderer.zoom}× · facing: ${this.facing}${stateLabel}</div>
+      <div>size: ${c.size.width}×${c.size.height} · view: ${c.view} · zoom: ${this.renderer.zoom}× · facing: ${this.facing}</div>
+      <div>${stateLine}</div>
     `;
   }
 
