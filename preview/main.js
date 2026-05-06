@@ -28,7 +28,7 @@
  */
 
 const PHASER_CDN = 'https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js';
-const DEFAULT_MAP = 'assets/scenes/test/interior_test.tmj';
+const DEFAULT_MAP = 'assets/scenes/test2/untitled.tmj';
 const DEFAULT_SPRITE_DIR = 'assets/sprites/yellow_Shiba';
 
 // 远景 (整张地图视野) / 近景 (玩家周围细节)
