@@ -587,7 +587,10 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
       this.currentAnimKey = null;
 
       // 6. Object-layer tile-objects 渲染 + solid 碰撞
-      // Tiled tile-object: x/y 是底-左角, 不是中心。我们换算到中心好放 origin (0.5, 0.5)。
+      // Tiled tile-object: x/y 是底-左角(也是 rotation 的 pivot)。
+      //   - 没旋转: origin 设 (0.5, 0.5), pos 设到 tile 中心 (经典)
+      //   - 有旋转 (obj.rotation 单位是度, CW 正): origin 设 (0, 1) 让旋转绕底-左转
+      //     这样 Tiled 里看到啥, 我们渲染就一致 (踢脚线、转角靠"旋转一根竖条"画的会对上)
       this.solidsGroup = this.physics.add.staticGroup();
       for (const ol of objLayers) {
         // 'walls' object layer 是旧约定 (空 rect 当墙), 放到 7. 处理
@@ -609,18 +612,31 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
             console.warn(`[preview] gid ${obj.gid} (${tsd.name}#${localId}): no image key found. Skipping.`);
             continue;
           }
-          const cx = obj.x + obj.width / 2;
-          const cy = obj.y - obj.height / 2;
+          const rotDeg = obj.rotation || 0;
+          const useBottomLeftOrigin = rotDeg !== 0;
+          const px = useBottomLeftOrigin ? obj.x : obj.x + obj.width / 2;
+          const py = useBottomLeftOrigin ? obj.y : obj.y - obj.height / 2;
+
           if (tileData.properties?.solid) {
-            const sprite = this.solidsGroup.create(cx, cy, imageKey);
-            sprite.body.setSize(obj.width, obj.height);
-            sprite.refreshBody();
+            // 静态 body 是 AABB, 旋转后用旋转后的 4 角 bbox
+            const sprite = this.solidsGroup.create(px, py, imageKey);
+            if (useBottomLeftOrigin) sprite.setOrigin(0, 1);
             if (flipH) sprite.setFlipX(true);
             if (flipV) sprite.setFlipY(true);
+            if (rotDeg) sprite.setRotation(rotDeg * Math.PI / 180);
+            const bb = _aabbAfterRotate(obj, rotDeg);
+            sprite.body.setSize(bb.w, bb.h);
+            // refreshBody 会读 sprite.getTopLeft + displaySize 算 body 位置
+            // 旋转 sprite 的 getTopLeft 是旋转后视觉左上, 跟 AABB 不一致 → 手动 set
+            sprite.refreshBody();
+            sprite.body.position.set(bb.minX, bb.minY);
+            sprite.body.updateCenter();
           } else {
-            const img = this.add.image(cx, cy, imageKey);
+            const img = this.add.image(px, py, imageKey);
+            if (useBottomLeftOrigin) img.setOrigin(0, 1);
             if (flipH) img.setFlipX(true);
             if (flipV) img.setFlipY(true);
+            if (rotDeg) img.setRotation(rotDeg * Math.PI / 180);
           }
         }
       }
@@ -765,4 +781,32 @@ function _propsFromTiledArray(arr) {
   const obj = {};
   for (const p of arr || []) obj[p.name] = p.value;
   return obj;
+}
+
+// 给定 Tiled tile-object {x,y,width,height} 与旋转角度 (度数, CW 正,
+// 绕 obj.x/y = 底-左角 转), 返回旋转后视觉占用的 AABB。
+// Tiled 里 tile 未旋转时占 (x..x+w, y-h..y); 我们 rotate 这 4 个角再取 min/max。
+function _aabbAfterRotate(obj, rotDeg) {
+  if (!rotDeg) {
+    return { minX: obj.x, minY: obj.y - obj.height, w: obj.width, h: obj.height };
+  }
+  const a = rotDeg * Math.PI / 180;
+  const cs = Math.cos(a), sn = Math.sin(a);
+  // 4 角相对 pivot (obj.x, obj.y) 的偏移
+  const corners = [
+    { dx: 0,          dy: -obj.height },   // top-left
+    { dx: obj.width,  dy: -obj.height },   // top-right
+    { dx: obj.width,  dy: 0 },             // bottom-right
+    { dx: 0,          dy: 0 },             // bottom-left (pivot)
+  ];
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const c of corners) {
+    const x = obj.x + c.dx * cs - c.dy * sn;
+    const y = obj.y + c.dx * sn + c.dy * cs;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  return { minX, minY, w: maxX - minX, h: maxY - minY };
 }
