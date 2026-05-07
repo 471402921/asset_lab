@@ -31,8 +31,13 @@ const PHASER_CDN = 'https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.j
 const DEFAULT_MAP = 'assets/scenes/test2/untitled.tmj';
 const DEFAULT_SPRITE_DIR = 'assets/sprites/yellow_Shiba';
 
+// 同 sprite_preview 与 index.html 里 #level-touch 的 media query 对齐:
+// 手机上 canvas 跟视口 1:1 (Phaser RESIZE), zoom 默认 1× 让玩家看到原图大小;
+// 桌面 canvas 内部 640², FIT 撑到 #game div, zoom 默认 2× 比较舒适
+const IS_MOBILE = window.matchMedia('(pointer: coarse), (max-width: 900px)').matches;
+
 // 远景 (整张地图视野) / 近景 (玩家周围细节)
-const ZOOM_LEVELS = [2, 4];
+const ZOOM_LEVELS = IS_MOBILE ? [1, 2] : [2, 4];
 const DEFAULT_ZOOM_INDEX = 0;
 
 const PLAYER_SPEED = 120;   // px/s
@@ -168,12 +173,19 @@ export class LevelPreviewMode {
       pixelArt: true,
       roundPixels: true,
       backgroundColor: '#000',
-      scale: {
-        mode: window.Phaser.Scale.FIT,
-        autoCenter: window.Phaser.Scale.CENTER_BOTH,
-        width: 640,
-        height: 640,
-      },
+      scale: IS_MOBILE
+        ? {
+            // 手机: canvas 跟 #game div 1:1 (无缩放) → 配合 zoom 1× 让玩家看到原图大小
+            mode: window.Phaser.Scale.RESIZE,
+            autoCenter: window.Phaser.Scale.CENTER_BOTH,
+          }
+        : {
+            // 桌面: 640² 内部 canvas, FIT 撑到 #game (640×640 div), zoom 2× 起步
+            mode: window.Phaser.Scale.FIT,
+            autoCenter: window.Phaser.Scale.CENTER_BOTH,
+            width: 640,
+            height: 640,
+          },
       physics: {
         default: 'arcade',
         arcade: { debug: false },
