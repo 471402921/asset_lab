@@ -9,6 +9,7 @@
 #   Hostname     : VM-0-4-ubuntu
 #   SSH key      : ~/.ssh/jet.pem      (RSA 2048,
 #                                       SHA256:5oKpQOCCDiaFL73tHoExI4wMXHCqsB839S8ZwTWToU0)
+#                  Override per-developer with:  export ASSET_LAB_SSH_KEY=~/.ssh/your.pem
 #   Server-side
 #   public key   : labelled `skey-kgkoxj5l` in Tencent Cloud console
 #   Remote dir   : ~/asset_lab          (rsync target)
@@ -45,7 +46,7 @@ set -euo pipefail
 REMOTE_HOST="1.14.190.95"
 REMOTE_USER="ubuntu"
 REMOTE_URL="https://1.14.190.95"
-SSH_KEY="${HOME}/.ssh/lissy.pem"
+SSH_KEY="${ASSET_LAB_SSH_KEY:-${HOME}/.ssh/jet.pem}"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 SSH_OPTS=(
