@@ -37,7 +37,11 @@
  <tile id="3">
   <image source="../../items/furniture/seating/furniture_single_sofa_nordic.png" width="64" height="64"/>
   <objectgroup draworder="index" id="2">
-   <object id="4" x="11" y="31" width="41" height="25"/>
+   <object id="4" x="11" y="31" width="41" height="25">
+    <properties>
+     <property name="solid" type="bool" value="true"/>
+    </properties>
+   </object>
   </objectgroup>
  </tile>
  <tile id="4">

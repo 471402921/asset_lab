@@ -587,11 +587,12 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
       this.player.setCollideWorldBounds(true);
       this.player.setDepth(10);     // 玩家始终在 tile / object 之上, 避免走进家具时被盖住
       // body 是 sprite 底部的"脚印", 不是整个 sprite。这是 top-down RPG 标准:
-      //   - 视觉上 sprite 头/身体可以"压"进墙/家具一点 (头比脚高一截, 越过桌沿是合理的)
-      //   - 真正阻挡移动的是脚 — 走进 32px 间距的家具缝是 OK 的, 不会被 60×60 卡死
-      // 比例选 1/3 宽 × 1/5 高 (chibi 比例: 头大身大脚小, 脚印很窄), 永远 ≥ 8px。
-      const bodyW = Math.max(8, Math.round(this.player.displayWidth / 3));
-      const bodyH = Math.max(8, Math.round(this.player.displayHeight / 5));
+      //   - 视觉上 sprite 头/身体可以"压"进墙/家具一点 (头比脚高, 越过桌沿是合理的)
+      //   - 真正阻挡移动的是脚
+      // 比例 1/2 宽 × 1/4 高 (常规, 不收缩) — 设计师可以靠 Tiled Collision Editor
+      // 在家具上画精准 footprint shape 做避让, body 不再代位补偿。永远 ≥ 8px。
+      const bodyW = Math.max(8, Math.round(this.player.displayWidth / 2));
+      const bodyH = Math.max(8, Math.round(this.player.displayHeight / 4));
       this.player.body.setSize(bodyW, bodyH);
       this.player.body.setOffset(
         Math.round((this.player.displayWidth - bodyW) / 2),
