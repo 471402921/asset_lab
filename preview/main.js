@@ -386,7 +386,7 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
         const tileCount = parseInt(root.getAttribute('tilecount'), 10) || 0;
         const columns = parseInt(root.getAttribute('columns'), 10) || 0;
 
-        const tsd = { name, firstgid: ts.firstgid, tileWidth, tileHeight, tiles: {} };
+        const tsd = { name, firstgid: ts.firstgid, tileWidth, tileHeight, tiles: {}, tileCount: 0, columns: 0, atlasWidth: 0 };
 
         // 转 Tiled JSON embedded 格式 (Phaser 能吃)
         const embedded = {
@@ -410,6 +410,9 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
           embedded.image = src;       // Phaser parser 用 (虽然我们不靠它装 image)
           embedded.imagewidth = parseInt(directImage.getAttribute('width'), 10) || 0;
           embedded.imageheight = parseInt(directImage.getAttribute('height'), 10) || 0;
+          tsd.tileCount = tileCount;
+          tsd.columns = columns;
+          tsd.atlasWidth = embedded.imagewidth;
         }
 
         // Per-tile <tile id="N"> blocks (image-collection 或 atlas 上加属性都走这里)
@@ -459,6 +462,28 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
       // 所有 PNG 排队后, 启动 load。complete 后构建 tilemap + 关卡。
       this.load.once('complete', () => {
         this.map = this.make.tilemap({ key: 'level' });
+        // Generate per-tile sub-textures from atlas for object-layer rendering
+        for (const tsd of this.tilesetData) {
+          if (!tsd.imageKey || tsd.tileCount === 0) continue;
+          const tex = this.textures.get(tsd.imageKey);
+          if (!tex) continue;
+          const src = tex.getSourceImage();
+          if (!src) continue;
+          const cols = tsd.columns || Math.floor(tsd.atlasWidth / tsd.tileWidth);
+          for (let i = 0; i < tsd.tileCount; i++) {
+            const key = `tile_${tsd.name}_${i}`;
+            if (this.textures.exists(key)) continue;
+            const col = i % cols;
+            const row = Math.floor(i / cols);
+            const c = document.createElement('canvas');
+            c.width = tsd.tileWidth;
+            c.height = tsd.tileHeight;
+            const ctx = c.getContext('2d');
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(src, col * tsd.tileWidth, row * tsd.tileHeight, tsd.tileWidth, tsd.tileHeight, 0, 0, tsd.tileWidth, tsd.tileHeight);
+            this.textures.addCanvas(key, c);
+          }
+        }
         this._buildLevel();
       });
       this.load.start();
@@ -569,17 +594,19 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
         if (ol.name === 'walls') continue;
         for (const obj of ol.objects) {
           if (!obj.gid) continue;   // 非 gid object (rect / polygon / point) 暂不渲
-          const tsd = this._findTilesetByGid(obj.gid);
+          // Tiled 用高 3 bit 编码 flip (0x80000000=H, 0x40000000=V, 0x20000000=D)
+          const rawGid = obj.gid;
+          const gid = rawGid & 0x1FFFFFFF;
+          const flipH = !!(rawGid & 0x80000000);
+          const flipV = !!(rawGid & 0x40000000);
+          const tsd = this._findTilesetByGid(gid);
           if (!tsd) continue;
-          const localId = obj.gid - tsd.firstgid;
+          const localId = gid - tsd.firstgid;
           const tileData = tsd.tiles[localId] ?? {};
-          const imageKey = tileData.imageKey ?? tsd.imageKey;
+          const subKey = `tile_${tsd.name}_${localId}`;
+          const imageKey = tileData.imageKey ?? (this.textures.exists(subKey) ? subKey : tsd.imageKey);
           if (!imageKey) {
-            // atlas 类 tileset 在 object layer 里渲染需要 sub-region, 暂不支持
-            console.warn(
-              `[preview] gid ${obj.gid} (${tsd.name}#${localId}) is from atlas tileset; ` +
-                `object-layer rendering needs per-tile image. Skipping.`
-            );
+            console.warn(`[preview] gid ${obj.gid} (${tsd.name}#${localId}): no image key found. Skipping.`);
             continue;
           }
           const cx = obj.x + obj.width / 2;
@@ -588,8 +615,12 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
             const sprite = this.solidsGroup.create(cx, cy, imageKey);
             sprite.body.setSize(obj.width, obj.height);
             sprite.refreshBody();
+            if (flipH) sprite.setFlipX(true);
+            if (flipV) sprite.setFlipY(true);
           } else {
-            this.add.image(cx, cy, imageKey);
+            const img = this.add.image(cx, cy, imageKey);
+            if (flipH) img.setFlipX(true);
+            if (flipV) img.setFlipY(true);
           }
         }
       }

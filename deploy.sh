@@ -45,7 +45,7 @@ set -euo pipefail
 REMOTE_HOST="1.14.190.95"
 REMOTE_USER="ubuntu"
 REMOTE_URL="https://1.14.190.95"
-SSH_KEY="${HOME}/.ssh/jet.pem"
+SSH_KEY="${HOME}/.ssh/lissy.pem"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 SSH_OPTS=(
