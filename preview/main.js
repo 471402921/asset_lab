@@ -455,6 +455,29 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
             tileEntry.imagewidth = parseInt(imgEl.getAttribute('width'), 10) || 0;
             tileEntry.imageheight = parseInt(imgEl.getAttribute('height'), 10) || 0;
           }
+
+          // Per-tile collision shapes (Tiled "Collision Editor"): tile 内部的 objectgroup
+          // 里每个 <object> 是一块碰撞 rect。我们只关心 properties.solid === true 的那些。
+          // 形状 x/y 是 tile-local top-left 坐标 (跟 tile 内部 0..tileWidth/Height 对齐)。
+          const shapes = [];
+          tileNode.querySelectorAll(':scope > objectgroup > object').forEach((shapeNode) => {
+            let solid = false;
+            shapeNode.querySelectorAll(':scope > properties > property').forEach((p) => {
+              if (p.getAttribute('name') === 'solid' &&
+                  p.getAttribute('value') === 'true') {
+                solid = true;
+              }
+            });
+            if (!solid) return;
+            shapes.push({
+              x: parseFloat(shapeNode.getAttribute('x')) || 0,
+              y: parseFloat(shapeNode.getAttribute('y')) || 0,
+              width: parseFloat(shapeNode.getAttribute('width')) || 0,
+              height: parseFloat(shapeNode.getAttribute('height')) || 0,
+            });
+          });
+          if (shapes.length) tileData.collisionShapes = shapes;
+
           if (propsArray.length) tileEntry.properties = propsArray;
           embeddedTiles.push(tileEntry);
           tsd.tiles[id] = tileData;
@@ -603,6 +626,12 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
       //   - 没旋转: origin 设 (0.5, 0.5), pos 设到 tile 中心 (经典)
       //   - 有旋转 (obj.rotation 单位是度, CW 正): origin 设 (0, 1) 让旋转绕底-左转
       //     这样 Tiled 里看到啥, 我们渲染就一致 (踢脚线、转角靠"旋转一根竖条"画的会对上)
+      // 碰撞优先级:
+      //   1. tile 的 collisionShapes (Tiled Collision Editor 画的, 每个 shape 上有 solid:true)
+      //      → per-shape AABB body (精准: 桌脚 / 墙根)
+      //   2. tile properties.solid: true (整 tile 都挡)
+      //      → 整 tile 的 AABB body (粗放, 老约定)
+      //   3. 都没有 → 无碰撞 (单纯装饰)
       this.solidsGroup = this.physics.add.staticGroup();
       for (const ol of objLayers) {
         // 'walls' object layer 是旧约定 (空 rect 当墙), 放到 7. 处理
@@ -632,26 +661,27 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
           const px = useBottomLeftOrigin ? obj.x : obj.x + obj.width / 2;
           const py = useBottomLeftOrigin ? obj.y : obj.y - obj.height / 2;
 
-          if (tileData.properties?.solid) {
-            // 静态 body 是 AABB, 旋转后用旋转后的 4 角 bbox
-            const sprite = this.solidsGroup.create(px, py, imageKey);
-            if (useBottomLeftOrigin) sprite.setOrigin(0, 1);
-            if (flipH) sprite.setFlipX(true);
-            if (flipV) sprite.setFlipY(true);
-            if (rotDeg) sprite.setRotation(rotDeg * Math.PI / 180);
+          // (a) 永远先渲染视觉
+          const img = this.add.image(px, py, imageKey);
+          if (useBottomLeftOrigin) img.setOrigin(0, 1);
+          if (flipH) img.setFlipX(true);
+          if (flipV) img.setFlipY(true);
+          if (rotDeg) img.setRotation(rotDeg * Math.PI / 180);
+
+          // (b) 然后按碰撞优先级加 static body (跟视觉分离, body 永远不可见)
+          const shapes = tileData.collisionShapes;
+          if (shapes && shapes.length) {
+            for (const shape of shapes) {
+              const bb = _shapeWorldAABB(shape, obj, tsd.tileWidth, tsd.tileHeight, flipH, flipV, rotDeg);
+              const cell = this.solidsGroup.create(bb.x + bb.w / 2, bb.y + bb.h / 2, null);
+              cell.setSize(bb.w, bb.h).setVisible(false);
+              cell.refreshBody();
+            }
+          } else if (tileData.properties?.solid) {
             const bb = _aabbAfterRotate(obj, rotDeg);
-            sprite.body.setSize(bb.w, bb.h);
-            // refreshBody 会读 sprite.getTopLeft + displaySize 算 body 位置
-            // 旋转 sprite 的 getTopLeft 是旋转后视觉左上, 跟 AABB 不一致 → 手动 set
-            sprite.refreshBody();
-            sprite.body.position.set(bb.minX, bb.minY);
-            sprite.body.updateCenter();
-          } else {
-            const img = this.add.image(px, py, imageKey);
-            if (useBottomLeftOrigin) img.setOrigin(0, 1);
-            if (flipH) img.setFlipX(true);
-            if (flipV) img.setFlipY(true);
-            if (rotDeg) img.setRotation(rotDeg * Math.PI / 180);
+            const cell = this.solidsGroup.create(bb.minX + bb.w / 2, bb.minY + bb.h / 2, null);
+            cell.setSize(bb.w, bb.h).setVisible(false);
+            cell.refreshBody();
           }
         }
       }
@@ -824,4 +854,39 @@ function _aabbAfterRotate(obj, rotDeg) {
     if (y > maxY) maxY = y;
   }
   return { minX, minY, w: maxX - minX, h: maxY - minY };
+}
+
+// shape: tile-local TL 坐标系下的 rect (Tiled Collision Editor 输出)。
+// 返回这个 rect 在世界里被 flip + rotation 变换后的 AABB。
+// tileW/H 是 tile 像素大小; obj 是放在地图里的 tile-object (x,y = 底-左角)。
+function _shapeWorldAABB(shape, obj, tileW, tileH, flipH, flipV, rotDeg) {
+  // shape 4 角, tile-local TL 坐标
+  let pts = [
+    { x: shape.x,                y: shape.y },
+    { x: shape.x + shape.width,  y: shape.y },
+    { x: shape.x + shape.width,  y: shape.y + shape.height },
+    { x: shape.x,                y: shape.y + shape.height },
+  ];
+  // flipH: 横向镜像 (绕 tile 中线 x = tileW/2)
+  if (flipH) pts = pts.map((p) => ({ x: tileW - p.x, y: p.y }));
+  // flipV: 纵向镜像 (绕 tile 中线 y = tileH/2)
+  if (flipV) pts = pts.map((p) => ({ x: p.x, y: tileH - p.y }));
+  // 转成相对 pivot (origin 在 tile-local 底-左 = (0, tileH))
+  let rel = pts.map((p) => ({ x: p.x, y: p.y - tileH }));
+  // 旋转
+  if (rotDeg) {
+    const a = rotDeg * Math.PI / 180;
+    const cs = Math.cos(a), sn = Math.sin(a);
+    rel = rel.map(({ x, y }) => ({ x: x * cs - y * sn, y: x * sn + y * cs }));
+  }
+  // 平移到世界 (pivot 世界坐标 = obj.x, obj.y)
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const { x, y } of rel) {
+    const wx = obj.x + x, wy = obj.y + y;
+    if (wx < minX) minX = wx;
+    if (wx > maxX) maxX = wx;
+    if (wy < minY) minY = wy;
+    if (wy > maxY) maxY = wy;
+  }
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
