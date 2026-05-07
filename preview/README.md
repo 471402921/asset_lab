@@ -28,11 +28,17 @@ cute_pet 工程师在 `cute_pet/lib/demo/level_preview.dart` 写出 minimal demo
 ✅ 做:
 - 加载 .tmj (Tiled JSON)
 - 支持外部 .tsx 引用 (Embed Tilesets 可勾可不勾):自动 fetch + parse XML + 解析 atlas 与 image-collection
-- 渲染 tile layers + object-layer 里的 gid tile-objects (家具、装饰)
+- 渲染 tile layers + object-layer 里的 gid tile-objects (家具、装饰、墙)
+- **honor Tiled tile-object 旋转** (`obj.rotation` 度数, CW, 绕底-左 pivot) 和翻转 (`obj.flippedHorizontal/Vertical`); atlas 的 sub-tile 也能在 object layer 渲染 (lissy 加的 sub-tile 切片)
 - 玩家 N 方向移动 (WASD / +QEZC, 跟 sprite 一致), Arcade Physics 矩形碰撞
-- per-tile property `solid: true` 自动加静态碰撞 (tile layer 与 object 都生效)
+- **碰撞两种来源都认**:
+  - per-tile collision shape (Tiled "Collision Editor" 画的 rect/ellipse, shape 上加 `solid:true`) — 支持 flip + rotation 后的 AABB,**精准且推荐**
+  - tile 级 property `solid:true` — 整 tile 当 body,fallback / 老约定
+- tile layer collision 同样走 `solid:true`(整列墙壁纸标 solid 可挡人)
 - 兼容旧约定 `walls` object layer (空 rect 当墙, 已有的 .tmj 不改也跑)
-- 相机两档 zoom (远景 2× / 近景 4×, 按 X 切换), 跟随玩家
+- 相机两档 zoom + 跟随玩家
+  - 桌面:`[2, 4]`,默认 2× 远景
+  - **手机:`[1, 2]`,默认 1× 原图大小** (检测同 sprite_preview 的 `(pointer: coarse), (max-width: 900px)` media query;手机走 `Phaser.Scale.RESIZE` 让 canvas 跟视口 1:1)
 - 缺 .tmj / 缺 sprite → 友好空态, 不启动 Phaser
 
 ❌ 不做:
@@ -42,7 +48,7 @@ cute_pet 工程师在 `cute_pet/lib/demo/level_preview.dart` 写出 minimal demo
 - NPC sprite 渲染 (设计师在 Tiled 摆的 NPC tile 暂不识别, 等真有 sprite NPC 再加)
 - 触发器 / 场景跳转
 - 音频
-- Matter Physics (任意 polygon collision) — Arcade 矩形够
+- Matter Physics (任意 polygon collision) — Arcade 矩形 + 旋转后 AABB 够
 
 ## 文件
 
@@ -55,15 +61,16 @@ cute_pet 工程师在 `cute_pet/lib/demo/level_preview.dart` 写出 minimal demo
 1. 在 Tiled 编辑关卡 (.tmj + 引用的 .tsx tilesets, 内部图集或 image-collection 都可)
 2. **导出 .tmj** (File > Save As, 选 .tmj 格式; 或 File > Export As > JSON map files (*.tmj))
 3. .tsx 可外部引用 (preview 自动 fetch),也可勾 Embed Tilesets (Map > Map Properties),两种 preview 都支持
-4. .tsx 里给会撞玩家的 tile 加 property `solid: true` (bool); 落地时 preview 会加静态碰撞体
-5. 保存到 `assets/scenes/{name}/{name}.tmj` (现行约定: `assets/scenes/test/interior_test.tmj`),.tsx 放 .tmj 同目录,引用的 PNG 放 `assets/{tile,items,wall,...}/` 对应分类
-6. 浏览器开 `index.html`, 切到 "level preview" tab → 立刻能玩
+4. **碰撞**:首选 Tiled "Collision Editor" (右键 tile → Tile Collision Editor) 画形状(rect 或 ellipse), 形状的 properties 加 `solid: true` (bool)。同一 tile 可有多个形状,只标 solid 的那部分挡玩家(例如柜子的脚印挡,柜身不挡)。也可用老路径:在 tile properties 直接加 `solid:true` 让整 tile 都挡。
+5. **旋转**:在 Tiled 里选中 tile-object 按 R(或 Object → Rotate)旋转 ±90°/180°,preview 会按 `obj.rotation` (绕底-左角) 渲染并把碰撞 AABB 也跟着转。**⚠️ Tiled 的 H/V 翻转跟旋转是两回事**:翻转是给 tile 本身镜像,旋转是把放下后的实例转方向。
+6. 保存到 `assets/scenes/{name}/{name}.tmj` (现行默认走 `preview/main.js` 的 `DEFAULT_MAP` 常量,目前指 `assets/scenes/test2/untitled.tmj`),.tsx 放 .tmj 同目录,引用的 PNG 放 `assets/{tile,items,wall,...}/` 对应分类
+7. 浏览器开 `index.html`, 切到 "level preview" tab → 立刻能玩。手机上同 URL 自动走 1:1 像素 + DPad
 
 ## 已知坑
 
 - **走路动画**: 玩家移动时按 sprite `frames.animations` 启发式找 `walk` state 播帧,缺方向 fallback 到 south。停止时若 sprite 有 `idle`/`stand`/`breath` 段则播放,否则静帧。
 - **NPC 不渲染**: Tiled 里摆的 sprite tile object 暂不认 (object 渲染只走 tile-image,sprite-as-tile 概念未支持)
-- **atlas-style tileset 在 object layer 用**: 假设场景里某个 object 的 gid 引到 atlas tileset 的 sub-tile, preview 当前只能渲染 image-collection 的 per-tile image,会 console.warn + skip。设计师当前 .tmj 全用 image-collection 摆 object 故无影响
+- **Phaser 已经把 .tmj 高位 flip bit 脱掉**,放在 `obj.flippedHorizontal/Vertical/AntiDiagonal`。**不要**对 `obj.gid` 再做 `& 0x80000000` (永远 false)。详见用户记忆 `feedback_tiled_phaser_parsing_gotchas.md`
 
 ## 给后续维护者
 

@@ -41,9 +41,12 @@ python3 tools/pixellab_to_tiled.py --help
 
 ```
 1. (可选) pixellab 生成基础 tile / 家具 / UI 单 PNG → 拷进 assets/{tile,items,...} 对应位置
-2. Tiled 里手画 / 拼地图 / 配 collision (per-tile property `solid:true`) / 摆 NPC
+2. Tiled 里手画 / 拼地图 / 配 collision / 摆 NPC
+   - 碰撞首选 Tiled "Collision Editor"(右键 tile → Tile Collision Editor),画 rect/ellipse 形状,在形状的 properties 加 `solid:true`(可一个 tile 多形状,只标 solid 的部分挡玩家 — 比如柜子的脚印挡,柜身不挡)
+   - 也可走老路径:tile-level properties 加 `solid:true` 让整 tile 都挡(粗放,但简单)
+   - 可在 Tiled 里用 R 旋转 tile-object,preview 会按 `obj.rotation` 渲染并把碰撞 AABB 跟着转
 3. Tiled 导出 .tmj (File > Save As 选 .tmj 格式), .tsx 可外部引用
-4. 放到 assets/scenes/{name}/{name}.tmj (路径 / 命名设计师定;现行约定 assets/scenes/test/interior_test.tmj)
+4. 放到 assets/scenes/{name}/{name}.tmj (路径 / 命名设计师定;preview 默认走 `preview/main.js` 的 `DEFAULT_MAP` 常量,目前指 `assets/scenes/test2/untitled.tmj`)
 5. 浏览器开 asset-lab → 切到 "level preview" 模式 → 立刻走起来
 6. git commit + push
 7. (cute_pet schema 稳定后) cute_pet 工程师 git pull → flame_tiled 加载新关卡
@@ -119,11 +122,11 @@ state_key 缺当前方向时自动 fallback 到 `south` 帧 (info 面板会标 `
 |---|---|
 | W / D / S / A | 玩家上 / 右 / 下 / 左移动 (移动时自动播 walk 动画) |
 | Q / E / Z / C | 仅 sprite 是 8-dir 时生效 (NW/NE/SW/SE 斜向移动);4-dir sprite 时静默 |
-| X | 相机 zoom 切换 (远景 2× ↔ 近景 4×, 都跟随玩家) |
+| X | 相机 zoom 切换 (桌面 2×↔4×;手机 1×↔2×, 都跟随玩家) |
 
 走路动画按 sprite `frames.animations` 里启发式找含 `walk` 的 state_key (设计师源头 semantic 命名后命中)。该方向缺 → south fallback → 静帧。停止时若 sprite 有 `idle`/`stand`/`breath` 段则播放,否则静帧。
 
-需要 `assets/scenes/{name}/{name}.tmj` (现行 `interior_test.tmj`) + `assets/sprites/yellow_Shiba/`(或其它默认 sprite,见 `preview/main.js` `DEFAULT_MAP` / `DEFAULT_SPRITE_DIR`)才能跑;缺资源给友好空态。Phaser 是 lazy load (CDN),切到 level mode 第一次加载需 ~1-2 秒。详细约束见 [preview/README.md](preview/README.md)。
+需要 `assets/scenes/{name}/{name}.tmj` (现行默认走 `preview/main.js` 的 `DEFAULT_MAP`) + `assets/sprites/{name}/`(同 `DEFAULT_SPRITE_DIR`)才能跑;缺资源给友好空态。Phaser 是 lazy load (CDN),切到 level mode 第一次加载需 ~1-2 秒。**手机自动 1:1 像素显示**(检测 `(pointer: coarse), (max-width: 900px)` → Phaser RESIZE + zoom 1×,整张地图 384×576 在大多数手机视口都能放下)。详细约束见 [preview/README.md](preview/README.md)。
 
 ---
 

@@ -8,6 +8,14 @@
 
 ## 修订记录
 
+- **2026-05-07 lissy 加入 + preview 加 tile 旋转 / 每形状碰撞 / 手机 1:1 渲染 / 多人 deploy**: 第二位设计师 lissy 入群,在 `lissy` 分支上交付第二份场景 `assets/scenes/test2/untitled.tmj` (12×18 tile + 客厅家具 + 窗户 + 完整边框墙)。她同时在 Tiled 里用了之前没踩过的几样:旋转 tile-object 拼边框 (4 边都用同一个垂直条 tile 旋转 ±90°),per-shape Collision Editor (柜子的脚印挡、柜身不挡)。preview 一开始没认这两样,渲染成围栏柱子 + 0 碰撞。改动:
+  - **`obj.rotation` 字段处理**: Tiled 里 R 键转的是对象实例的 rotation (度数, CW, **绕底-左角 pivot**),跟 gid 高位 H/V flip 不同。preview/main.js 给旋转过的 sprite 设 origin=(0,1) + setRotation,碰撞 body 用旋转后 4 角的 AABB
+  - **`obj.flippedHorizontal/Vertical/AntiDiagonal`**: Phaser 的 tilemap parser 已经把 gid 高 3 bit 脱掉,放进对象的 boolean 字段。lissy 之前那个 commit 在已脱过的 gid 上做 `& 0x80000000` 永远 false → 翻转全失效,棕线落错位置。改成读 boolean 字段
+  - **per-shape collision (Tiled "Collision Editor")**: tile 的 `<objectgroup>` 里每个 `<object>` 自己带 `<properties>` 包含 `solid:true` 的才挡人。同 tile 多形状时只挡 solid 那部分。preview 的 .tsx parser 多收一份 `tile.collisionShapes`,渲染时按 flip+rotation 变换 4 角后给每个 shape 单独建一个 invisible static body
+  - **手机 1:1 渲染**: 同 sprite_preview 的 `(pointer: coarse), (max-width: 900px)` media query 检测,手机走 `Phaser.Scale.RESIZE` (canvas 内部 = DOM = 视口) + 默认 zoom 1× (`ZOOM_LEVELS = [1, 2]`),整张 384×576 地图在手机视口 1:1 像素全可见。桌面不变 (FIT 640² + zoom 2/4)
+  - **deploy.sh 多人开发**: SSH_KEY 改成 `${ASSET_LAB_SSH_KEY:-${HOME}/.ssh/jet.pem}`,lissy 在自己 shell rc 设 `export ASSET_LAB_SSH_KEY=~/.ssh/lissy.pem` 即可,以后两人都不用动脚本
+  - **新增记忆 `feedback_tiled_phaser_parsing_gotchas.md`**: 三个 .tmj/Phaser 解析坑(flip 位被脱、rotation 是独立字段、per-shape collision)集中文档化,下次不踩
+  - 旧记忆 `project_collision_schema_migration.md` 删除 — 设计师没走"另起 collision object layer"那条路,而是用 Tiled Collision Editor 的 per-shape solid 直接在 .tsx 里标,精度更细 + 不用每张地图重画
 - **2026-05-05 (7th revision today) 设计师 round 2 目录重构 + 第一份真 .tmj 落地, preview 加外部 .tsx + object 渲染 + solid 碰撞**: 设计师交付 `assets/scenes/test/interior_test.tmj` (10×10 tile + 7 件日式家具 object) + 全新 `assets/` 顶级布局 (scenes/tile/wall/items/effects/fonts/ui)。preview 升级:
   - **外部 .tsx 引用支持**: preview/main.js fetch .tsx + 解析 XML + 把 atlas / image-collection 转成 Tiled JSON embedded 格式塞回 Phaser cache, 绕开 Phaser 自身的 "External tilesets unsupported" 限制
   - **object-layer tile-object 渲染**: per-object 按 gid 反查 tileset, image-collection 用 per-tile PNG, atlas tileset 在 object 里暂不支持 (warn skip)

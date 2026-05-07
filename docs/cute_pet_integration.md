@@ -6,9 +6,9 @@
 >
 > ## Readiness gates(都过才发布)
 >
-> - [x] 设计师在 Tiled 里完成 1-2 张真实关卡,layer 命名 / tile property / object 命名等约定稳定下来(本 doc §3 由此填实) — **2026-05-05 第一份 `interior_test.tmj` 落地**, 约定: tile/object 用 `solid:true` 加碰撞, 关卡放 `assets/scenes/{name}/`, 文件名 snake_case, .tsx 可外部引用
+> - [x] 设计师在 Tiled 里完成 1-2 张真实关卡,layer 命名 / tile property / object 命名等约定稳定下来(本 doc §3 由此填实) — **2026-05-05 第一份 `interior_test.tmj` 落地**;**2026-05-07 lissy 第二份 `test2/untitled.tmj` 落地**,加入 Tiled tile-object 旋转 + 每形状 (per-shape) Collision Editor 用法,asset-lab preview 同步支持。约定: 每形状 `solid:true` (推荐) 或 tile 级 `solid:true` (fallback);.tmj 放 `assets/scenes/{name}/`;.tsx 可外部引用
 > - [x] 第一只完整 sprite 跑通: pixellab → `assets/sprites/{name}/` → `python3 tools/pixellab_to_tiled.py --sprites` 出 `.tsx` → 设计师在 Tiled 里把 NPC 摆进 .tmj — **2026-05-05 yellow_Shiba 落地** (但还没真摆进 .tmj)
-> - [x] **asset-lab `preview/` 临时拐杖跑通真实 .tmj**: 设计师能在浏览器里 "走起来", solid:true 标记的 object 都是碰撞体 (验证 Tiled 端约定 + .tmj 格式可用) — **2026-05-05 通过, interior_test.tmj 在 https://1.14.190.95/ 跑通**
+> - [x] **asset-lab `preview/` 临时拐杖跑通真实 .tmj**: 设计师能在浏览器里 "走起来", solid:true 标记的形状都是碰撞体 (验证 Tiled 端约定 + .tmj 格式可用) — **2026-05-05 通过 interior_test;2026-05-07 通过 test2/untitled (含旋转墙边 + 每形状碰撞)**, 在 https://1.14.190.95/ 跑通
 > - [ ] cute_pet 工程师在 cute_pet 仓写出 `lib/demo/level_preview.dart` minimal entry, 跑通同一份 .tmj — **此时 asset-lab `preview/` 拆除**, 本 doc 把 preview runtime 章节标 ARCHIVED
 > - [x] `assets/` 子目录最终布局由设计师敲定(本 doc §1 由此填实) — **2026-05-05 round 2 完成**, 见 §1
 > - [ ] audio 文件命名 / 目录约定经过 1-2 个真音效验证(本 doc §1 audio 部分由此填实)
@@ -16,7 +16,7 @@
 >
 > **当前 known-unstable 区**:
 > - `assets/` 子目录布局(§1)— 等设计师按 Tiled 工程惯例定型
-> - .tmj 内 layer 命名 / object 类型 / tile property 约定(§3)— 等设计师做完真关卡;asset-lab `preview/` 临时拐杖目前默认约定 `walls` object layer + tile property `collides:true`, cute_pet 接手时若改命名,本 doc 同步
+> - .tmj 内 layer 命名约定(§3)— 当前只有 `wall`/`baseboard`/`furnitures` 几个真名,等更多关卡;asset-lab `preview/` 临时拐杖兼容旧 `walls` object layer 也兼容 image+collision shape
 > - flame_tiled 加载示例(§4)— 大方向稳定,但具体 layer name 要等 §3 约定填实
 > - cute_pet 改动清单粒度(§6)
 >
@@ -160,13 +160,17 @@ asset-lab **不**做的:
 
 ---
 
-## 3. Tiled 约定 (2026-05-05 第一份真 .tmj `interior_test.tmj` 落地后实测)
+## 3. Tiled 约定 (2026-05-05 ~ 2026-05-07 实测)
 
 设计师在 Tiled 里编辑关卡时, 跟 cute_pet 工程师**已对齐**:
 - **关卡放 `assets/scenes/{name}/{name}.tmj`** (一关一子目录, .tmj 跟引用的 .tsx 同放在 `assets/scenes/{name}/`)
-- **tile/object 碰撞**: `.tsx` 里 per-tile property `solid: true` (bool)。flame_tiled 应按 `solid` 读, 不是 `collides` (历史 plan 的猜测词, 已废)
-- **object layer 名字不强制约定**: 当前 `interior_test.tmj` 用 Tiled 默认名 `Object Layer 1`。家具/装饰对象都是 gid 引用的 tile-objects (不是 rectangle/polygon)
-- **legacy `walls` object layer** (空 rect 当墙) 仍兼容, 但当前 .tmj 没用, 推荐 per-tile `solid` 路径
+- **碰撞 = `solid: true`,两种粒度都认**(flame_tiled / cute_pet 加载时都要支持):
+  - **per-shape (推荐, 精准)**: tile 的 `<objectgroup>` 里画 rect/ellipse 形状,**每个形状自己的 `<properties>` 上加 `solid:true`**。同一 tile 可以有多个形状,只标 solid 的部分挡玩家(柜子的脚印挡,柜身不挡)。Tiled 里走 "Tile Collision Editor"(右键 tile)。**lissy 的 `test2/untitled.tmj` 全用此路径**
+  - **tile 级 (粗放, 简单)**: tile 自己 `<properties>` 上加 `solid:true`,整 tile 都挡(不分形状)。**老的 `interior_test.tmj` 走此路径**
+  - 不是 `collides` — 那是历史 plan 的猜测词, 已废
+- **tile-object 旋转 + 翻转**: 用 Tiled 的 R 键旋转或 Object 菜单翻转。.tmj 里 `obj.rotation`(度数, CW, **绕 tile 底-左角 pivot**), 翻转走 gid 高位 (Phaser 与 flame_tiled 都会脱出来放到对象的 boolean 字段)。preview/main.js 视觉 + 碰撞 AABB 都按这两个变换跟随
+- **object layer 命名**: 当前没强制规约。lissy 用 `wall` / `baseboard` / `furnitures` 分层, 跟 `Object Layer 1` 默认名都跑得通。cute_pet 接手时若需要靠 layer name 区分逻辑(如"墙"vs"装饰"),提案见 §3.1(待写)
+- **legacy `walls` object layer** (空 rect 当墙) 仍兼容, 但新关卡都不用 — 都走 tile-object + per-shape collision
 - **NPC 标记**: 暂未定 (待第一只 NPC sprite 摆进 .tmj)
 
 asset-lab `preview/` 临时拐杖按上面约定跑;cute_pet flame_tiled 应该看这一节实装。
