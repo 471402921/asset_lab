@@ -597,11 +597,14 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
         if (ol.name === 'walls') continue;
         for (const obj of ol.objects) {
           if (!obj.gid) continue;   // 非 gid object (rect / polygon / point) 暂不渲
-          // Tiled 用高 3 bit 编码 flip (0x80000000=H, 0x40000000=V, 0x20000000=D)
-          const rawGid = obj.gid;
-          const gid = rawGid & 0x1FFFFFFF;
-          const flipH = !!(rawGid & 0x80000000);
-          const flipV = !!(rawGid & 0x40000000);
+          // Phaser tilemap parser 已经把 Tiled 的 flip 高位 (0x80000000=H, 0x40000000=V,
+          // 0x20000000=AntiDiagonal) 脱出来放进 obj.flippedHorizontal/Vertical/AntiDiagonal,
+          // 所以 obj.gid 这里是 base gid。**不要**再对它做位运算 (会永远 false)。
+          const gid = obj.gid;
+          const flipH = !!obj.flippedHorizontal;
+          const flipV = !!obj.flippedVertical;
+          // 注意: 旋转 90°/270° 在 Tiled 是 H+AD / V+AD; 我们同时支持 obj.rotation
+          // 字段(度数, CW), 优先级更明确, 这里 anti-diagonal 暂不单独翻译。
           const tsd = this._findTilesetByGid(gid);
           if (!tsd) continue;
           const localId = gid - tsd.firstgid;
