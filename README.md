@@ -6,7 +6,7 @@
 2. **pixellab sprite → Tiled `.tsx` 转换**(Python 脚本,在 `tools/`)
 3. **Web 端 sprite 预览**(浏览器跑,纯 vanilla JS;按 sprite 实际方向数 4 或 8 自适应键盘交互;状态切换 + 动画播放已实装,触屏 UI 自动启用)
 
-外加**临时拐杖**:**Web 端关卡运行时预览**(Phaser CDN,`preview/`)。设计师改完 `.tmj` 浏览器秒开就能"走一走"。等 cute_pet 工程师把 `lib/demo/level_preview.dart` 写好后整段拆掉。详见 [preview/README.md](preview/README.md)。
+外加**临时拐杖**:**Web 端关卡运行时预览**(Phaser CDN,`preview/`)+ **PC 远程控制台**(`console.html`)。设计师改完 `.tmj` 浏览器秒开就能"走一走"。手机端 level mode 是干净 canvas(无 UI),拍演示视频时 PC 上开 console 远程驱动手机里的小狗 (DPad / 状态条 / 播放控件)。等 cute_pet 工程师把 `lib/demo/level_preview.dart` 写好后整段拆掉。详见 [preview/README.md](preview/README.md)。
 
 **地图和关卡编辑由设计师在 [Tiled](https://www.mapeditor.org/) 里直接做并导出 `.tmj`**,asset-lab 不参与地图转换。**pixellab 在工作流里只产基础 PNG 元素 + 角色 sprite**(后者动画帧多,需要转换支持)。**cute_pet** 用 `flame_tiled` 直接消费 `.tmj`,asset-lab 不替它写 Dart。
 
@@ -122,11 +122,26 @@ state_key 缺当前方向时自动 fallback 到 `south` 帧 (info 面板会标 `
 |---|---|
 | W / D / S / A | 玩家上 / 右 / 下 / 左移动 (移动时自动播 walk 动画) |
 | Q / E / Z / C | 仅 sprite 是 8-dir 时生效 (NW/NE/SW/SE 斜向移动);4-dir sprite 时静默 |
+| Tab | 清 forced state, 回 walk/idle 启发式自动模式 |
+| Digit 1-9 | 选 forced state (跟 sprite_preview 一致的顺序), 选中自动播 |
+| Space | forced state 下 pause/resume |
+| `[` / `]` | forced state 下单步翻帧 |
 | X | 相机 zoom 切换 (桌面 2×↔4×;手机 1×↔2×, 都跟随玩家) |
 
-走路动画按 sprite `frames.animations` 里启发式找含 `walk` 的 state_key (设计师源头 semantic 命名后命中)。该方向缺 → south fallback → 静帧。停止时若 sprite 有 `idle`/`stand`/`breath` 段则播放,否则静帧。
+走路动画按 sprite `frames.animations` 里启发式找含 `walk` 的 state_key (设计师源头 semantic 命名后命中)。该方向缺 → south fallback → 静帧。停止时若 sprite 有 `idle`/`stand`/`breath` 段则播放,否则静帧。**forced state (Digit1-9) 完全覆盖启发式**:即使移动也只播 forced anim,Tab 才能回自动模式。
 
-需要 `assets/scenes/{name}/{name}.tmj` (现行默认走 `preview/main.js` 的 `DEFAULT_MAP`) + `assets/sprites/{name}/`(同 `DEFAULT_SPRITE_DIR`)才能跑;缺资源给友好空态。Phaser 是 lazy load (CDN),切到 level mode 第一次加载需 ~1-2 秒。**手机自动 1:1 像素显示**(检测 `(pointer: coarse), (max-width: 900px)` → Phaser RESIZE + zoom 1×,整张地图 384×576 在大多数手机视口都能放下)。详细约束见 [preview/README.md](preview/README.md)。
+需要 `assets/scenes/{name}/{name}.tmj` (现行默认走 `preview/main.js` 的 `DEFAULT_MAP`) + `assets/sprites/{name}/`(同 `DEFAULT_SPRITE_DIR`)才能跑;缺资源给友好空态。Phaser 是 lazy load (CDN),切到 level mode 第一次加载需 ~1-2 秒。**手机自动 1:1 像素显示 + 隐藏所有 UI**(检测 `(pointer: coarse), (max-width: 900px)` → Phaser RESIZE + zoom 1×,整张地图 384×576 在大多数手机视口都能放下;`#info`/`#prompt`/`#level-touch` 全 hide,只剩游戏 canvas)。详细约束见 [preview/README.md](preview/README.md)。
+
+#### 录视频:PC 远程控制台 (临时拐杖)
+
+打开 `https://1.14.190.95/console.html` 在 PC 浏览器上,跟手机配合录演示视频:
+
+- 手机访问 `https://1.14.190.95/?mode=level`(干净游戏画面,没 UI)
+- PC 上 console.html 提供 DPad + 状态条 + 播放 + zoom 按钮 + 物理键盘双绑(同 sprite_preview 键位)
+- console 操作 → POST `/api/control` → 手机 50ms 短轮询拉取 → 小狗响应 (端到端 ~100ms 内)
+- 录像取手机画面,console 不会出现在镜头里
+
+console.html / `/api/control` endpoint 都跟 `preview/` 同生命周期,cute_pet 接手后一起拆。
 
 ---
 
@@ -165,13 +180,18 @@ tools/                               # 转换 pipeline (sprite-only)
 
 preview/                             # ★ 临时拐杖: Phaser 关卡运行时预览
 └── main.js                          # lazy-load Phaser CDN, 加载 .tmj (含外部 .tsx),
-                                     #   渲染 tile/object 层, solid:true 加碰撞
+                                     #   渲染 tile/object 层, solid:true 加碰撞,
+                                     #   /api/control 短轮询接 PC 远程控制
+console.html                         # ★ 临时拐杖: PC 远程控制台 (录视频专用)
+                                     #   跟 preview/ 同生命周期, 一起拆
 
 docs/cute_pet_integration.md         # 给 cute_pet 工程师的契约 (DRAFT)
 
 modes/sprite_preview.js              # 浏览器 sprite 预览
 core/, loaders/, keymap.js, index.html
 deploy.sh, deploy/asset-lab-https.service, _https_server.py   # 部署到 1.14.190.95
+                                     # _https_server.py 含 /api/control endpoint
+                                     # (录像专用 console relay, ThreadingHTTPServer)
 ```
 
 `assets/` 子目录约定由**设计师定**(她在 Tiled 里习惯什么布局就用什么),asset-lab 跟随。详见 [asset-lab-plan.md](asset-lab-plan.md)。

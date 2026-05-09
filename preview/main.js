@@ -13,9 +13,14 @@
  *   - 相机两档 zoom (远景 2× / 近景 4×, 按 X 切换), 跟随玩家
  *   - 玩家移动时播 walking 动画 (按 plan §13.1 fallback chain), 停止时播 idle 段
  *     (启发式按 state_key 名字找 walk/idle, 设计师 semantic 命名后命中)
+ *   - **PC 远程控制台 (console.html) 通过 /api/control 短轮询驱动**:
+ *       - DPad / 物理键盘 → POST keys 持续状态
+ *       - 状态条 / 数字键 → POST stateReq, scene 接 forced state
+ *       - Tab 清回自动模式 (heuristic walk/idle)
+ *       - Space + [/] → POST animReq, scene 控制 Phaser anim 播放/暂停/单步
+ *       - X / zoom button → POST zoomReq
  *   - 缺资源 → 友好空态, 不启动 Phaser
- *   - **手机触屏支持**: DPad + zoom 浮在 Phaser 上方 (#level-touch DOM 容器),
- *     pointerdown/up 写共享 touchState 对象, scene.update() 跟键盘并联读
+ *   - 手机端不再渲染浮动 DPad / info 文字 (录像专用, 控制全靠 PC 控制台)
  *
  * 不做:
  *   - 业务逻辑 / 状态机 / 任务 / 对话 / 背包 / NPC AI
@@ -25,11 +30,17 @@
  *   - 音频 (Phaser audio 留给真用时再加)
  *   - pinch-to-zoom / swipe 手势 (破坏整数像素纯度 + 跟原生浏览器手势冲突)
  *   - 非 gid 类型的 object (rectangle / polygon 区域、trigger 等) — 当前只识别 gid 对象
+ *   - 多控制台 / 多手机会话 (单全局 state, 一台机一个录像设计师)
  */
 
 const PHASER_CDN = 'https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js';
 const DEFAULT_MAP = 'assets/scenes/test2/untitled.tmj';
 const DEFAULT_SPRITE_DIR = 'assets/sprites/yellow_Shiba';
+
+// PC 远程控制台 (console.html) 通过 /api/control 中转, 手机端轮询读控件状态。
+// 50ms = 20Hz; 加上网络一来一回 ~50ms, 端到端 ~100ms 内, 录像够用。
+const CONSOLE_POLL_URL = '/api/control';
+const CONSOLE_POLL_MS = 50;
 
 // 同 sprite_preview 与 index.html 里 #level-touch 的 media query 对齐:
 // 手机上 canvas 跟视口 1:1 (Phaser RESIZE), zoom 默认 1× 让玩家看到原图大小;
@@ -98,10 +109,12 @@ export class LevelPreviewMode {
     this.infoElement = infoElement;
     this.promptElement = promptElement;
     this.emptyStateElement = emptyStateElement;
-    this.levelTouch = levelTouch ?? null;     // mobile-only DOM (DPad + zoom button)
+    this.levelTouch = levelTouch ?? null;     // mobile-only DPad container; 不再 wire, 仅做 hide 用
     this.game = null;
-    this.touchState = null;                    // shared with Phaser scene; mutated by DOM
-    this._touchCleanup = [];
+    this.touchState = null;                    // shared with Phaser scene; 由 console 轮询写, scene 读
+    this._pollHandle = null;
+    this._lastSeqs = { state: -1, anim: -1, zoom: -1 };
+    this._mobileHidden = [];                   // 记录被隐藏的元素, stop() 时还原
   }
 
   async start() {
@@ -120,7 +133,7 @@ export class LevelPreviewMode {
       return this._showEmpty('关卡 .tmj', e.message, DEFAULT_MAP);
     }
 
-    // sprite 已知后, 提示面板按真实方向数显示 (4-dir vs 8-dir)
+    // sprite 已知后, 提示面板按真实方向数显示 (4-dir vs 8-dir) — 桌面才看得到
     this._showPrompt(spriteMeta);
 
     // 2. lazy load Phaser
@@ -131,13 +144,16 @@ export class LevelPreviewMode {
       return this._showEmpty('Phaser CDN', e.message, PHASER_CDN);
     }
 
-    // 3. 启动 Phaser game
+    // 3. 启动 Phaser game + 隐藏手机端 UI (干净录像)
     this._hideEmpty();
+    if (IS_MOBILE) this._hideMobileUI();
     this._startGame(spriteMeta);
+    this._startPolling();
   }
 
   stop() {
-    this._unwireTouchUI();
+    this._stopPolling();
+    this._restoreMobileUI();
     if (this.game) {
       this.game.destroy(true);
       this.game = null;
@@ -148,12 +164,34 @@ export class LevelPreviewMode {
     if (this.promptElement) this.promptElement.innerHTML = '';
   }
 
+  _hideMobileUI() {
+    // 录像专用: 手机上 #info / #level-touch / #prompt 都进画面, 全部隐藏。
+    // PC 控制台 (console.html) 才是控制入口, 手机仅显示干净游戏画面。
+    for (const el of [this.infoElement, this.promptElement, this.levelTouch]) {
+      if (el && el.style.display !== 'none') {
+        this._mobileHidden.push({ el, prev: el.style.display });
+        el.style.display = 'none';
+      }
+    }
+  }
+
+  _restoreMobileUI() {
+    for (const { el, prev } of this._mobileHidden) {
+      el.style.display = prev || '';
+    }
+    this._mobileHidden = [];
+  }
+
   _startGame(spriteMeta) {
-    // touchState 是 LevelPreviewMode 跟 Phaser scene 之间的共享状态对象。
-    // DOM 按钮 (mobile DPad / zoom) 写它, scene.update() 读它。
+    // touchState: scene 跟 polling 之间的共享状态对象。
+    //   - keys: 持续按下的方向 (console DPad 持续按住)
+    //   - stateReq / animReq: 一次性事件 (scene 消费后置 null)
+    //   - zoomTrigger: 一次性 (scene 消费后置 false)
     this.touchState = {
       north: false, east: false, south: false, west: false,
       'north-east': false, 'north-west': false, 'south-east': false, 'south-west': false,
+      stateReq: null,           // { value: 'index:N' | 'clear' }
+      animReq: null,            // { value: 'toggle_play' | 'next' | 'prev' }
       zoomTrigger: false,
     };
 
@@ -192,57 +230,60 @@ export class LevelPreviewMode {
       },
       scene: SceneClass,
     });
-
-    if (this.levelTouch) this._wireTouchUI(spriteMeta);
   }
 
-  _wireTouchUI(spriteMeta) {
-    const availableDirs = new Set(Object.keys(spriteMeta.frames.rotations));
-    const dpad = this.levelTouch.querySelector('#level-dpad');
-    if (dpad) {
-      dpad.querySelectorAll('button[data-dir]').forEach((btn) => {
-        const dir = btn.dataset.dir;
-        if (availableDirs.has(dir)) {
-          btn.hidden = false;
-          const setOn = (e) => {
-            e.preventDefault();
-            this.touchState[dir] = true;
-            btn.classList.add('pressed');
-          };
-          const setOff = (e) => {
-            if (e?.preventDefault) e.preventDefault();
-            this.touchState[dir] = false;
-            btn.classList.remove('pressed');
-          };
-          btn.addEventListener('pointerdown', setOn);
-          btn.addEventListener('pointerup', setOff);
-          btn.addEventListener('pointercancel', setOff);
-          btn.addEventListener('pointerleave', setOff);
-          this._touchCleanup.push(() => {
-            btn.removeEventListener('pointerdown', setOn);
-            btn.removeEventListener('pointerup', setOff);
-            btn.removeEventListener('pointercancel', setOff);
-            btn.removeEventListener('pointerleave', setOff);
-          });
-        } else {
-          btn.hidden = true;
+  /* ────────────────────────────────────────────────────────────────────────
+   * Console polling: PC 上 console.html POST 给 /api/control, 这里轮询读。
+   * 把持续按键写进 touchState, 单调计数器化的事件请求 (state/anim/zoom)
+   * 只在 seq 增长时塞进 touchState 对应槽, scene update() 消费后清。
+   * 这样事件不会重复触发, 也不会丢 (50ms 一轮足够覆盖手指节奏)。
+   * ──────────────────────────────────────────────────────────────────────── */
+
+  _startPolling() {
+    if (this._pollHandle) return;
+    let inflight = false;
+    this._pollHandle = setInterval(async () => {
+      if (inflight) return;          // 网络慢时不重叠请求
+      inflight = true;
+      try {
+        const r = await fetch(CONSOLE_POLL_URL, { cache: 'no-store' });
+        if (!r.ok) return;
+        const ctrl = await r.json();
+        const remoteKeys = ctrl.keys || {};
+        for (const dir of [
+          'north', 'east', 'south', 'west',
+          'north-east', 'north-west', 'south-east', 'south-west',
+        ]) {
+          this.touchState[dir] = !!remoteKeys[dir];
         }
-      });
-    }
-    const zoomBtn = this.levelTouch.querySelector('#level-zoom');
-    if (zoomBtn) {
-      const onZoom = (e) => {
-        e.preventDefault();
-        this.touchState.zoomTrigger = true;
-      };
-      zoomBtn.addEventListener('pointerdown', onZoom);
-      this._touchCleanup.push(() => zoomBtn.removeEventListener('pointerdown', onZoom));
-    }
+        const sr = ctrl.stateReq;
+        if (sr && typeof sr.seq === 'number' && sr.seq > this._lastSeqs.state) {
+          this._lastSeqs.state = sr.seq;
+          this.touchState.stateReq = { value: sr.value };
+        }
+        const ar = ctrl.animReq;
+        if (ar && typeof ar.seq === 'number' && ar.seq > this._lastSeqs.anim) {
+          this._lastSeqs.anim = ar.seq;
+          this.touchState.animReq = { value: ar.value };
+        }
+        const zr = ctrl.zoomReq;
+        if (zr && typeof zr.seq === 'number' && zr.seq > this._lastSeqs.zoom) {
+          this._lastSeqs.zoom = zr.seq;
+          this.touchState.zoomTrigger = true;
+        }
+      } catch (e) {
+        // 网络抖动 / endpoint 不存在 → 静默, 下次再 poll
+      } finally {
+        inflight = false;
+      }
+    }, CONSOLE_POLL_MS);
   }
 
-  _unwireTouchUI() {
-    this._touchCleanup.forEach((fn) => fn());
-    this._touchCleanup = [];
+  _stopPolling() {
+    if (this._pollHandle) {
+      clearInterval(this._pollHandle);
+      this._pollHandle = null;
+    }
   }
 
   _showPrompt(spriteMeta) {
@@ -252,7 +293,9 @@ export class LevelPreviewMode {
       dirCount >= 8 ? 'WASD + QEZC (8 方向)' : 'WASD (4 方向)';
     this.promptElement.innerHTML = `
       <div class="kg"><b>move</b>: ${moveLabel}</div>
+      <div class="kg"><b>state</b>: Tab 清 · 1-9 选 · Space 播 · [/] 步</div>
       <div class="kg"><b>zoom</b>: X (远景 ↔ 近景)</div>
+      <div class="kg"><b>remote</b>: PC 开 <code>/console.html</code> 远程驱动</div>
     `;
   }
 
@@ -292,6 +335,10 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
     constructor() {
       super('PreviewScene');
       this.zoomIndex = DEFAULT_ZOOM_INDEX;
+      // forced state (PC 控制台选状态后, 覆盖 walk/idle 启发式)
+      // null = 自动模式 (按移动状态切 walk/idle)
+      this.forcedStateKey = null;
+      this.forcedPlaying = true;     // 选状态时默认开播; Space 切换; [/] 单步则 false
     }
 
     preload() {
@@ -616,6 +663,7 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
         }
       }
       const stateKeys = Object.keys(anims);
+      this.stateKeys = stateKeys;          // 给 _handleStateReq 按 index 选用
       const findKey = (hints) =>
         stateKeys.find((k) => hints.some((h) => k.toLowerCase().includes(h))) ?? null;
       this.walkingKey = findKey(WALKING_NAME_HINTS);
@@ -731,12 +779,21 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
     update() {
       if (!this._tilemapReady || !this.player) return;
 
-      // Touch zoom 单触发 (DOM 按钮 pointerdown 写 true, scene 消费后清)
+      // Touch zoom 单触发 (DOM 按钮 / console pollerWriter 设 true, scene 消费后清)
       if (touch.zoomTrigger) {
         this.zoomIndex = (this.zoomIndex + 1) % ZOOM_LEVELS.length;
         this.cameras.main.setZoom(ZOOM_LEVELS[this.zoomIndex]);
         this._updateInfo();
         touch.zoomTrigger = false;
+      }
+      // Console state / animation 请求 (LevelPreviewMode 轮询 seq 单调写入)
+      if (touch.stateReq) {
+        this._handleStateReq(touch.stateReq.value);
+        touch.stateReq = null;
+      }
+      if (touch.animReq) {
+        this._handleAnimReq(touch.animReq.value);
+        touch.animReq = null;
       }
 
       let vx = 0;
@@ -766,7 +823,13 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
       }
 
       // 决策播啥动画 (fallback chain: 见 plan §13.1)
+      // forced state 一旦移动就自动清掉, 回 walk 启发式 (录像时不用先 Tab 再走)
       const isMoving = vx !== 0 || vy !== 0;
+      if (isMoving && this.forcedStateKey) {
+        this.forcedStateKey = null;
+        this.forcedPlaying = true;
+        this._updateInfo();
+      }
       const desiredAnimKey = this._pickAnimKey(isMoving);
 
       const animChanged = desiredAnimKey !== this.currentAnimKey;
@@ -774,6 +837,16 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
         if (animChanged) {
           this.player.play(desiredAnimKey, true);
           this.currentAnimKey = desiredAnimKey;
+        }
+        // forced state 下尊重 forcedPlaying (Space 切了 pause), 自动模式永远播
+        if (this.forcedStateKey) {
+          if (this.forcedPlaying) {
+            if (this.player.anims.isPaused) this.player.anims.resume();
+          } else {
+            if (this.player.anims.isPlaying) this.player.anims.pause();
+          }
+        } else {
+          if (this.player.anims.isPaused) this.player.anims.resume();
         }
       } else {
         if (this.currentAnimKey) {
@@ -789,6 +862,7 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
     }
 
     // 返回应播的 anim key, 或 null (静帧 fallback)。
+    // 优先级: forced state (console 显式选) > 移动启发式 > idle 启发式
     _pickAnimKey(isMoving) {
       const dir = this.player.facing;
       const tryState = (stateKey) => {
@@ -797,17 +871,58 @@ function makePreviewScene({ spriteMeta, mapPath, spriteDir, onInfoUpdate, touchS
         if (!dirMap) return null;
         return dirMap[dir] ?? dirMap.south ?? null;
       };
+      if (this.forcedStateKey) return tryState(this.forcedStateKey);
       if (isMoving) return tryState(this.walkingKey);
       return tryState(this.idleKey);
+    }
+
+    /* ──────────────────────────────────────────────────────────────────────
+     * Console-driven state / animation control.
+     * 跟 sprite_preview 的 _handleState / _handleAnimation 同语义,
+     * 区别只是用 Phaser anims API 而非 RAF 自驱。
+     * ────────────────────────────────────────────────────────────────────── */
+
+    _handleStateReq(value) {
+      if (value === 'clear') {
+        this.forcedStateKey = null;
+        this.forcedPlaying = true;       // 回到自动模式, 启发式默认播
+      } else if (value && value.startsWith('index:')) {
+        const idx = parseInt(value.slice(6), 10);
+        if (!Number.isFinite(idx) || idx < 0 || idx >= this.stateKeys.length) return;
+        this.forcedStateKey = this.stateKeys[idx];
+        this.forcedPlaying = true;       // 选状态自动开播 (跟 sprite_preview 一致)
+      }
+      this._updateInfo();
+    }
+
+    _handleAnimReq(value) {
+      // 仅在 forced state 下生效 (自动模式没有"暂停"概念, 由移动驱动)
+      if (!this.forcedStateKey) return;
+      if (value === 'toggle_play') {
+        this.forcedPlaying = !this.forcedPlaying;
+      } else if (value === 'next' || value === 'prev') {
+        this.forcedPlaying = false;
+        if (this.player.anims.isPlaying) this.player.anims.pause();
+        // Phaser 3.80: nextFrame() / previousFrame() 在 paused 状态下能用
+        if (value === 'next') this.player.anims.nextFrame();
+        else this.player.anims.previousFrame();
+      }
+      this._updateInfo();
     }
 
     _updateInfo() {
       if (!this.player || !onInfoUpdate) return;
       const z = ZOOM_LEVELS[this.zoomIndex];
       const zoomLabel = this.zoomIndex === 0 ? '远景' : '近景';
-      const animLine = this.currentAnimKey
-        ? `anim: <b>${this.currentAnimKey.replace('play:', '')}</b>`
-        : 'anim: <i>(static)</i>';
+      let animLine;
+      if (this.forcedStateKey) {
+        const playMark = this.forcedPlaying ? '▶' : '⏸';
+        animLine = `anim: <b>${this.forcedStateKey}</b> ${playMark} <span style="color:#f0c674">(forced)</span>`;
+      } else if (this.currentAnimKey) {
+        animLine = `anim: <b>${this.currentAnimKey.replace('play:', '')}</b> <span style="color:#888">(auto)</span>`;
+      } else {
+        animLine = 'anim: <i>(static)</i>';
+      }
       onInfoUpdate(
         `<div><b>level:</b> ${mapPath}</div>` +
           `<div>player: ${spriteDir} · facing: ${this.player.facing} · zoom: ${z}× (${zoomLabel}, X 切换)</div>` +

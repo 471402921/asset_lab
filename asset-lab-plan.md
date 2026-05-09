@@ -8,6 +8,15 @@
 
 ## 修订记录
 
+- **2026-05-08 PC 远程控制台 + preview 加状态动画 + 手机录像 UI 清理**: 设计师要拍 cute_pet 演示视频, preview 之前只播 walk/idle (启发式), 看不到 sleeping/yawn/crouch 等姿态。同时手机端浮动 DPad + info 文字会进画面, 录视频不干净。手指按手机也不方便。改:
+  - **PC 远程控制台 `console.html`**: 新文件, 单页 HTML + ES module。DPad + 状态条 (Static + 各 state) + 播放控件 + zoom + 物理键盘双绑 (复用 `keymap.js` 的 `SPRITE_KEYMAP`)。任意操作 → POST `/api/control` 即时同步
+  - **`_https_server.py` 加 `/api/control` endpoint** (12 → ~45 行): 自定义 Handler 带 GET/POST + 内存 dict + Lock + ThreadingHTTPServer (一行 stdlib drop-in)。GET 返回完整 state, POST 合并 update。stdlib 内 0 依赖, 不破"don't reinvent"
+  - **协议**: `keys` (持续按下方向, 短轮询每帧覆盖) + `stateReq/animReq/zoomReq` (单调 seq counter, 手机 lastSeq < 才消费, 不重不丢)。短轮询 50ms (20Hz), 端到端 latency ~100ms (网络主导)
+  - **preview/main.js forced state**: 新增 `forcedStateKey` / `forcedPlaying`, `_pickAnimKey` 优先返回 forced state 的 anim, 完全覆盖 walk/idle 启发式。Tab 清回自动模式; Digit1-9 选状态自动开播; Space pause/resume; [/] 单步 (Phaser anims.pause/resume/nextFrame/previousFrame)。 跟 sprite_preview 同语义
+  - **手机端 level mode UI 清理**: `LevelPreviewMode.start()` 检测 `IS_MOBILE` 时把 `#info`/`#prompt`/`#level-touch` 全设 `display: none` (stop() 还原)。 录视频画面只剩游戏 canvas, header bar 保留 (导航必要)。 桌面无变化
+  - **轮询接管 touchState**: `_startPolling()` 50ms 一轮 fetch `/api/control`, 持续按键直接覆盖到 `touchState[dir]`, 事件请求按 seq 单调写到 `touchState.stateReq/animReq` + `zoomTrigger`, scene.update() 消费后清。inflight 标志防重叠请求
+  - **mobile DPad wiring 删了**: `_wireTouchUI` / `_unwireTouchUI` 整段移除, 不再 wire `#level-touch` (DOM 还在 index.html, hide 即可)
+  - **拆除时一起拆**: `console.html` + `/api/control` endpoint 跟 `preview/` 同生命周期, cute_pet 接手后 4 处一起删 (preview/main.js, console.html, _https_server.py 回退到 12 行, index.html 移按钮)
 - **2026-05-07 lissy 加入 + preview 加 tile 旋转 / 每形状碰撞 / 手机 1:1 渲染 / 多人 deploy**: 第二位设计师 lissy 入群,在 `lissy` 分支上交付第二份场景 `assets/scenes/test2/untitled.tmj` (12×18 tile + 客厅家具 + 窗户 + 完整边框墙)。她同时在 Tiled 里用了之前没踩过的几样:旋转 tile-object 拼边框 (4 边都用同一个垂直条 tile 旋转 ±90°),per-shape Collision Editor (柜子的脚印挡、柜身不挡)。preview 一开始没认这两样,渲染成围栏柱子 + 0 碰撞。改动:
   - **`obj.rotation` 字段处理**: Tiled 里 R 键转的是对象实例的 rotation (度数, CW, **绕底-左角 pivot**),跟 gid 高位 H/V flip 不同。preview/main.js 给旋转过的 sprite 设 origin=(0,1) + setRotation,碰撞 body 用旋转后 4 角的 AABB
   - **`obj.flippedHorizontal/Vertical/AntiDiagonal`**: Phaser 的 tilemap parser 已经把 gid 高 3 bit 脱掉,放进对象的 boolean 字段。lissy 之前那个 commit 在已脱过的 gid 上做 `& 0x80000000` 永远 false → 翻转全失效,棕线落错位置。改成读 boolean 字段
