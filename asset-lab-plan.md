@@ -8,6 +8,15 @@
 
 ## 修订记录
 
+- **2026-05-17 让位 :443 给 nginx**: cute pixel console (`console.ewow.cn`) 要部署到同一台 box `1.14.190.95`,iOS NSAllowsArbitraryLoads + 自签 cert + WebSocket 联调阻塞 → 必须上正经域名 + Let's Encrypt cert + nginx host-based 分流。nginx 接管 :443 (SSL termination + vhost),asset-lab 让到 `127.0.0.1:8001`,nginx fallback vhost 反代回来。改动:
+  - **`_https_server.py:14`**: `PORT = 443` → `PORT = 8001`。bind 仍是 `0.0.0.0`(security group 没开 8001 对外,所以 `0.0.0.0`/`127.0.0.1` 外部不可区分;不动 bind 是最小改动,贴近 cute pixel 直接 `sed` 的路径)。cert wrap 保留 — nginx `proxy_pass https://127.0.0.1:8001`,我们这一端要继续讲 TLS
+  - **不动的东西**: systemd unit `User=root` (8001 其实不需要 root,但改 unit 越界); `httpd.socket` ssl 包装; `deploy.sh deploy` 的 curl 验证步骤 (经 nginx 反代仍能命中)
+  - **设计师 URL 不变**: `https://1.14.190.95/` 仍然能开,只是经 nginx → :8001。LE cert 也比之前自签 cert 友好(浏览器不再红警告,但 CN 不是 IP 仍会有一次警告 — 跟以前差不多)
+  - **box 上的安装动作**(install nginx / 写 vhost / 签 cert)由 cute pixel 那边做,asset-lab 这边只同步 repo 改动避免下次 redeploy 把 `PORT` 改回 `443` 撞 nginx
+  - **文档同步**: `deploy.sh` 头部 "Why HTTPS on 443" 注释更新;CLAUDE.md 部署段 "12-line on :443" 改成 ":8001 behind nginx";CLAUDE.md hard rules "HTTPS on :443 forced by security group" 段补 nginx fronts 注释
+  - **handoff 文档**: <https://github.com/471402921/consle/blob/main/handoff/asset-lab.md>
+  - **跟 lissy 分支同步**: 这条改动同时落在 `lissy` (commit e84292d) 和 `main` 两个分支,因为是部署合同,任何分支 `./deploy.sh deploy` 都得带新 PORT。lissy 上 2026-05-07 / 2026-05-08 的工作仍在 lissy 等正常 merge 回 main
+
 - **2026-05-05 (7th revision today) 设计师 round 2 目录重构 + 第一份真 .tmj 落地, preview 加外部 .tsx + object 渲染 + solid 碰撞**: 设计师交付 `assets/scenes/test/interior_test.tmj` (10×10 tile + 7 件日式家具 object) + 全新 `assets/` 顶级布局 (scenes/tile/wall/items/effects/fonts/ui)。preview 升级:
   - **外部 .tsx 引用支持**: preview/main.js fetch .tsx + 解析 XML + 把 atlas / image-collection 转成 Tiled JSON embedded 格式塞回 Phaser cache, 绕开 Phaser 自身的 "External tilesets unsupported" 限制
   - **object-layer tile-object 渲染**: per-object 按 gid 反查 tileset, image-collection 用 per-tile PNG, atlas tileset 在 object 里暂不支持 (warn skip)

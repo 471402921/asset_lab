@@ -20,6 +20,7 @@ Plus a **temporary scaffold**: **Browser level runtime preview** ([preview/](pre
 - 2026-05-05 (5th revision): sprite cut to 4-cardinal directions; code became sprite-driven for direction count; sprite schema 雏形 declared stable
 - 2026-05-05 (6th revision): mobile touch UI added (sprite + level both); media-query gated, zero desktop regression
 - 2026-05-05 (7th revision): final assets/ directory layout settled (scenes/ replaces maps/, tile/ replaces tilesets/, items/ deeply categorized, +effects/fonts/ui/wall); preview/main.js gains external .tsx loader + object-layer tile-object rendering + `solid:true` collision (designer shipped first real .tmj `interior_test.tmj`)
+- 2026-05-17: port handoff to nginx. cute pixel console (`console.ewow.cn`) shares the same box and needs :443 for SSL termination + host-based vhost. asset-lab moves to `:8001` behind nginx reverse-proxy; external `https://1.14.190.95/` URL unchanged for the designer. Only `_https_server.py` PORT + a few doc comments changed in repo; nginx install / cert / vhost config done by cute pixel side. See [handoff doc](https://github.com/471402921/consle/blob/main/handoff/asset-lab.md). (Cherry-picked from `lissy` branch — the lissy / PC-console work since 2026-05-07 will land via the normal merge.)
 
 ## What this tool is (and is NOT)
 
@@ -112,11 +113,11 @@ Live preview at **<https://1.14.190.95/>** (Tencent Cloud CVM, self-signed cert 
 ./deploy.sh deploy            # rsync → systemctl restart asset-lab-https → curl verify
 ```
 
-Other [`deploy.sh`](deploy.sh) subcommands: `ssh` / `run "<cmd>"` / `ping`. Server-side runtime is a systemd unit ([deploy/asset-lab-https.service](deploy/asset-lab-https.service)) running [`_https_server.py`](_https_server.py) — a 12-line TLS-wrapped `SimpleHTTPServer` on :443. Logs via `./deploy.sh run 'sudo journalctl -u asset-lab-https -n 50 --no-pager'`.
+Other [`deploy.sh`](deploy.sh) subcommands: `ssh` / `run "<cmd>"` / `ping`. Server-side runtime is a systemd unit ([deploy/asset-lab-https.service](deploy/asset-lab-https.service)) running [`_https_server.py`](_https_server.py) on :8001 behind nginx (nginx owns :443, see "HTTPS on :443" rule below). Logs via `./deploy.sh run 'sudo journalctl -u asset-lab-https -n 50 --no-pager'`.
 
 Hard rules around deploy:
 - **Don't reinvent.** All deploy state (host, user, key, port choice, systemd unit) is documented in `deploy.sh`'s header comment. Read it first; don't re-derive.
-- **HTTPS on :443 is forced by the security group**, not by HTTP-protocol filtering. The security group on this CVM only opens 22 / 443 / 22940 / 18789. Other ports look reachable (`nc -zv` says "succeeded") but the cloud edge spoofs the TCP handshake and silently drops data — so don't waste time on `python3 -m http.server 8000` thinking it'll work externally. To use a different port: 控制台 → 安全组 → 入站规则.
+- **HTTPS on :443 is forced by the security group**, not by HTTP-protocol filtering. The security group on this CVM only opens 22 / 443 / 22940 / 18789. Other ports look reachable (`nc -zv` says "succeeded") but the cloud edge spoofs the TCP handshake and silently drops data — so don't waste time on `python3 -m http.server 8000` thinking it'll work externally. To use a different port: 控制台 → 安全组 → 入站规则. **Since 2026-05-17 nginx owns :443** (LE cert, host-based vhost — shares the box with cute pixel console `console.ewow.cn`) and reverse-proxies the fallback vhost to asset-lab at `https://127.0.0.1:8001`. asset-lab binds :8001 only; we still keep the self-signed cert because nginx talks to us over TLS too. External URL `https://1.14.190.95/` unchanged for the designer.
 - **`cert.pem` / `key.pem` live only on the remote** (generated once with `openssl`, gitignored). `deploy` doesn't overwrite them.
 - **`_https_server.py` and `deploy/asset-lab-https.service` ARE tracked** — they're the deploy contract.
 
