@@ -23,12 +23,20 @@
 # Users tried and rejected: root, lighthouse, centos, jet.d.
 #
 # -----------------------------------------------------------------------------
-# Why HTTPS on 443 (not HTTP on 8000)?
+# Why HTTPS (and why we don't bind :443 ourselves anymore)
 # -----------------------------------------------------------------------------
 # The Tencent Cloud security group on this CVM only opens 22 / 443 / 22940 /
 # 18789. Other ports (8000, 8443, ...) get TCP-spoofed by the cloud edge:
 # `nc -zv` says "succeeded" but actual data is dropped — looks like an HTTP
 # protocol filter, isn't. To open another port: 控制台 → 安全组 → 入站规则.
+#
+# Up to 2026-05-17 _https_server.py bound :443 directly. Since then nginx
+# owns :443 (Let's Encrypt cert, host-based vhost — cute pixel console
+# `console.ewow.cn` shares the box) and reverse-proxies the fallback vhost
+# to us at https://127.0.0.1:8001. asset-lab now binds :8001 only. External
+# URL https://1.14.190.95/ unchanged from the designer's POV (still hits the
+# preview, just via nginx). See cute pixel handoff:
+#   https://github.com/471402921/consle/blob/main/handoff/asset-lab.md
 #
 # -----------------------------------------------------------------------------
 # Server-side runtime

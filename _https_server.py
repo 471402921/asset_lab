@@ -7,13 +7,19 @@
 # drive the mobile preview runtime. Single-tenant in-memory relay; see
 # console.html / preview/main.js for the protocol. Threaded so 50ms polls
 # from the phone don't queue behind static-file requests.
+#
+# Since 2026-05-17 this no longer binds the public :443. nginx on the box
+# owns :443 (LE cert, SSL termination + host-based vhost) and reverse-proxies
+# to us at https://127.0.0.1:8001. We keep our self-signed cert because nginx
+# talks to us over TLS too (proxy_pass https://...). See cute pixel console
+# handoff: https://github.com/471402921/consle/blob/main/handoff/asset-lab.md
 import http.server
 import json
 import ssl
 import os
 from threading import Lock
 
-PORT = 443  # security group only opens 443 / 22940 / 18789; 443 = clean URL (needs sudo)
+PORT = 8001  # behind nginx on :443; security group only opens 443/22940/18789 externally
 CERT = os.path.join(os.path.dirname(__file__), 'cert.pem')
 KEY = os.path.join(os.path.dirname(__file__), 'key.pem')
 ROOT = os.path.dirname(os.path.abspath(__file__))
